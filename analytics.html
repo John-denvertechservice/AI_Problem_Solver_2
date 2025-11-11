@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chrome Problem Solver - Analytics</title>
+  <link rel="stylesheet" href="analytics.css">
+</head>
+<body>
+  <div class="analytics-container">
+    <header class="analytics-header">
+      <h1>Usage Analytics</h1>
+      <p class="analytics-subtitle">Track your AI assistant usage and performance</p>
+    </header>
+
+    <div class="analytics-dashboard">
+      <!-- Overview Cards -->
+      <div class="analytics-cards">
+        <div class="analytics-card">
+          <div class="card-icon">📊</div>
+          <div class="card-content">
+            <div class="card-value" id="total-requests">0</div>
+            <div class="card-label">Total Requests</div>
+          </div>
+        </div>
+
+        <div class="analytics-card">
+          <div class="card-icon">✅</div>
+          <div class="card-content">
+            <div class="card-value" id="success-rate">0%</div>
+            <div class="card-label">Success Rate</div>
+          </div>
+        </div>
+
+        <div class="analytics-card">
+          <div class="card-icon">⚡</div>
+          <div class="card-content">
+            <div class="card-value" id="avg-response-time">0ms</div>
+            <div class="card-label">Avg Response Time</div>
+          </div>
+        </div>
+
+        <div class="analytics-card">
+          <div class="card-icon">🎯</div>
+          <div class="card-content">
+            <div class="card-value" id="total-conversations">0</div>
+            <div class="card-label">Conversations</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Provider Stats -->
+      <section class="analytics-section">
+        <h2>Provider Usage</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <h3>OpenAI</h3>
+            <div class="stat-value" id="openai-count">0</div>
+            <div class="stat-percentage" id="openai-percentage">0%</div>
+          </div>
+          <div class="stat-card">
+            <h3>Claude</h3>
+            <div class="stat-value" id="claude-count">0</div>
+            <div class="stat-percentage" id="claude-percentage">0%</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Model Stats -->
+      <section class="analytics-section">
+        <h2>Model Usage</h2>
+        <div class="model-stats" id="model-stats">
+          <!-- Dynamically populated -->
+        </div>
+      </section>
+
+      <!-- Content Type Stats -->
+      <section class="analytics-section">
+        <h2>Content Type Analysis</h2>
+        <div class="content-type-stats" id="content-type-stats">
+          <!-- Dynamically populated -->
+        </div>
+      </section>
+
+      <!-- Recent Activity -->
+      <section class="analytics-section">
+        <h2>Recent Activity</h2>
+        <div class="activity-list" id="activity-list">
+          <!-- Dynamically populated -->
+        </div>
+      </section>
+    </div>
+
+    <footer class="analytics-footer">
+      <button class="analytics-btn analytics-btn-secondary" id="refresh-data">Refresh</button>
+      <button class="analytics-btn analytics-btn-secondary" id="export-analytics">Export</button>
+    </footer>
+  </div>
+
+  <script src="analytics.js"></script>
+</body>
+</html>
+

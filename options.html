@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chrome Problem Solver - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <h1>Chrome Problem Solver</h1>
+      <p class="options-subtitle">Configure your AI assistant settings</p>
+    </header>
+
+    <div class="options-tabs">
+      <button class="options-tab active" data-tab="provider">Provider</button>
+      <button class="options-tab" data-tab="api">API Keys</button>
+      <button class="options-tab" data-tab="preferences">Preferences</button>
+    </div>
+
+    <div class="options-content">
+      <!-- Provider Tab -->
+      <div class="options-tab-content active" data-content="provider">
+        <section class="options-section">
+          <h2>AI Provider</h2>
+          <p class="section-description">Choose your preferred AI provider</p>
+          
+          <div class="provider-cards">
+            <div class="provider-card" data-provider="openai">
+              <div class="provider-card-header">
+                <div class="provider-icon">🤖</div>
+                <h3>OpenAI</h3>
+              </div>
+              <p class="provider-description">GPT-4o, GPT-4o Mini, and GPT-4 Turbo models</p>
+              <div class="provider-features">
+                <span class="feature-tag">Fast</span>
+                <span class="feature-tag">Vision</span>
+              </div>
+            </div>
+            
+            <div class="provider-card" data-provider="claude">
+              <div class="provider-card-header">
+                <div class="provider-icon">🧠</div>
+                <h3>Claude</h3>
+              </div>
+              <p class="provider-description">Claude 3.5 Sonnet, Haiku, and Opus models</p>
+              <div class="provider-features">
+                <span class="feature-tag">Accurate</span>
+                <span class="feature-tag">Vision</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="options-section">
+          <h2>Model Selection</h2>
+          <p class="section-description">Select the model to use for analysis</p>
+          
+          <div class="model-selector">
+            <label for="model-select">Model</label>
+            <select id="model-select" class="options-select">
+              <option value="">Select a model...</option>
+            </select>
+            <p class="field-hint" id="model-hint"></p>
+          </div>
+        </section>
+      </div>
+
+      <!-- API Keys Tab -->
+      <div class="options-tab-content" data-content="api">
+        <section class="options-section">
+          <h2>API Keys</h2>
+          <p class="section-description">Enter your API keys to enable AI analysis</p>
+          
+          <div class="api-key-field">
+            <label for="openai-key">OpenAI API Key</label>
+            <div class="input-group">
+              <input type="password" id="openai-key" class="options-input" placeholder="sk-...">
+              <button class="toggle-visibility" data-target="openai-key">👁️</button>
+            </div>
+            <p class="field-hint">
+              Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>
+            </p>
+          </div>
+
+          <div class="api-key-field">
+            <label for="claude-key">Claude API Key</label>
+            <div class="input-group">
+              <input type="password" id="claude-key" class="options-input" placeholder="sk-ant-...">
+              <button class="toggle-visibility" data-target="claude-key">👁️</button>
+            </div>
+            <p class="field-hint">
+              Get your key from <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Preferences Tab -->
+      <div class="options-tab-content" data-content="preferences">
+        <section class="options-section">
+          <h2>Usage Tracking</h2>
+          <p class="section-description">Manage your usage data and statistics</p>
+          
+          <div class="preference-item">
+            <label class="checkbox-label">
+              <input type="checkbox" id="track-usage" checked>
+              <span>Track usage statistics</span>
+            </label>
+            <p class="field-hint">Store usage data locally for analytics</p>
+          </div>
+
+          <div class="preference-item">
+            <button class="options-btn options-btn-secondary" id="clear-data">Clear All Data</button>
+            <p class="field-hint">Remove all stored usage data and history</p>
+          </div>
+
+          <div class="preference-item">
+            <button class="options-btn options-btn-secondary" id="export-data">Export Data</button>
+            <p class="field-hint">Download your usage data as JSON</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="options-footer">
+      <button class="options-btn options-btn-primary" id="save-settings">Save Settings</button>
+      <div class="save-status" id="save-status"></div>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
+

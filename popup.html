@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chrome Problem Solver</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <h1>Chrome Problem Solver</h1>
+      <div class="popup-status" id="status-indicator">
+        <span class="status-dot"></span>
+        <span class="status-text">Ready</span>
+      </div>
+    </header>
+
+    <div class="popup-content">
+      <div class="popup-stats">
+        <div class="stat-item">
+          <div class="stat-value" id="quick-requests">0</div>
+          <div class="stat-label">Requests</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="quick-success">0%</div>
+          <div class="stat-label">Success</div>
+        </div>
+      </div>
+
+      <div class="popup-actions">
+        <button class="popup-btn popup-btn-primary" id="open-settings">Settings</button>
+        <button class="popup-btn popup-btn-secondary" id="open-analytics">Analytics</button>
+      </div>
+
+      <div class="popup-info">
+        <p>Select text or an image and press <kbd>Shift+Alt+A</kbd> (use the <kbd>Option</kbd> key on Mac) to analyze.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
