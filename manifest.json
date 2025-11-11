@@ -41,6 +41,13 @@
         "mac": "Alt+Shift+A"
       },
       "description": "Analyze selected text or image"
+    },
+    "welcome-bubble": {
+      "suggested_key": {
+        "default": "Alt+Shift+K",
+        "mac": "Alt+Shift+K"
+      },
+      "description": "Open Welcome Bubble"
     }
   },
   "icons": {

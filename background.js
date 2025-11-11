@@ -818,7 +818,7 @@ function trackUsage(data) {
 
 // Handle command shortcut
 chrome.commands.onCommand.addListener((command) => {
-  if (command === 'analyze-selection') {
+  if (command === 'analyze-selection' || command === 'welcome-bubble') {
     // Send message to active tab's content script (safely)
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs && tabs[0];
@@ -833,7 +833,7 @@ chrome.commands.onCommand.addListener((command) => {
       }
 
       try {
-        chrome.tabs.sendMessage(tab.id, { action: 'analyze-selection' }, (response) => {
+        chrome.tabs.sendMessage(tab.id, { action: command }, (response) => {
           // Swallow the common MV3 error when no receiver exists on a page
           if (chrome.runtime.lastError) {
             const errorMsg = chrome.runtime.lastError.message || '';

@@ -6,6 +6,7 @@ let isMinimized = false;
 let conversationHistory = [];
 let currentConversation = null;
 let currentThread = null; // Current conversation thread with context
+let overlayMode = 'analysis'; // 'bubble' or 'analysis'
 
 // Initialize on page load
 (function() {
@@ -28,6 +29,9 @@ function init() {
         handleSelection();
       }
       sendResponse({ success: true });
+    } else if (request.action === 'welcome-bubble') {
+      handleWelcomeBubbleHotkey();
+      sendResponse({ success: true });
     }
     return true; // Keep channel open for async response
   });
@@ -40,27 +44,33 @@ function init() {
   document.addEventListener('keyup', handleSelectionChange);
 }
 
-// Handle hotkey (Alt+Shift+A — Option key on Mac)
+// Handle hotkey (Alt+Shift+A — Option key on Mac, Alt+Shift+K for Welcome Bubble)
 function handleHotkey(event) {
-  // Check if it's the right key combination (Shift + Alt/Option + A)
+  // Don't trigger if user is typing in an input field
+  const activeElement = document.activeElement;
+  if (activeElement && (
+    activeElement.tagName === 'INPUT' ||
+    activeElement.tagName === 'TEXTAREA' ||
+    activeElement.isContentEditable
+  )) {
+    return;
+  }
+  
   const modifier = event.altKey;
   const shiftKey = event.shiftKey;
   const isKeyA = event.code === 'KeyA' || /^a$/i.test(event.key ?? '');
-  const aKey = isKeyA;
+  const isKeyK = event.code === 'KeyK' || /^k$/i.test(event.key ?? '');
   
-  if (modifier && shiftKey && aKey) {
-    // Don't trigger if user is typing in an input field
-    const activeElement = document.activeElement;
-    if (activeElement && (
-      activeElement.tagName === 'INPUT' ||
-      activeElement.tagName === 'TEXTAREA' ||
-      activeElement.isContentEditable
-    )) {
-      return;
-    }
-    
+  // Handle Alt+Shift+A for analysis
+  if (modifier && shiftKey && isKeyA) {
     event.preventDefault();
     handleSelection();
+  }
+  
+  // Handle Alt+Shift+K for Welcome Bubble
+  if (modifier && shiftKey && isKeyK) {
+    event.preventDefault();
+    handleWelcomeBubbleHotkey();
   }
 }
 
@@ -305,7 +315,12 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
 // Show overlay window
 function showOverlayWindow() {
   if (!overlayWindow) {
-    createOverlayWindow();
+    createOverlayWindow('analysis');
+  }
+  
+  // Ensure we're in analysis mode
+  if (overlayMode !== 'analysis') {
+    morphToAnalysisMode();
   }
   
   // Remove hidden and minimized classes to show the window
@@ -318,61 +333,94 @@ function showOverlayWindow() {
 }
 
 // Create overlay window
-function createOverlayWindow() {
+function createOverlayWindow(mode = 'analysis') {
   overlayWindow = document.createElement('div');
   overlayWindow.id = 'chrome-problem-solver-overlay';
-  overlayWindow.innerHTML = `
-    <div class="cps-header">
-      <div class="cps-title">Chrome Problem Solver</div>
-      <div class="cps-controls">
-        <button class="cps-btn cps-minimize" title="Minimize">−</button>
-        <button class="cps-btn cps-close" title="Close">×</button>
-      </div>
-    </div>
-    <div class="cps-tabs">
-      <button class="cps-tab active" data-tab="main">Analysis</button>
-      <button class="cps-tab" data-tab="history">History</button>
-    </div>
-    <div class="cps-content">
-      <div class="cps-tab-content active" data-content="main">
-        <div class="cps-response-area"></div>
-        <div class="cps-confidence">
-          <div class="cps-confidence-label">Confidence</div>
-          <div class="cps-confidence-bar">
-            <div class="cps-confidence-fill"></div>
-          </div>
-          <div class="cps-confidence-percentage">0%</div>
-        </div>
-        <div class="cps-followup">
-          <div class="cps-followup-input-wrapper">
-            <textarea 
-              class="cps-followup-input" 
-              placeholder="Ask a follow up or clarification!"
-              maxlength="500"
-              rows="2"
-            ></textarea>
-            <div class="cps-word-count">0/50 words</div>
-          </div>
-          <button class="cps-send-btn" id="send-followup">Send</button>
-        </div>
-        <div class="cps-feedback">
-          <button class="cps-feedback-btn cps-like" title="Like">👍</button>
-          <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
-        </div>
-      </div>
-      <div class="cps-tab-content" data-content="history">
-        <div class="cps-history-list"></div>
-      </div>
-    </div>
-  `;
+  overlayMode = mode;
+  overlayWindow.className = `cps-mode-${mode}`;
   
-  document.body.appendChild(overlayWindow);
-  
-  // Add event listeners
-  setupWindowControls();
-  setupTabs();
-  setupFeedback();
-  setupFollowUp();
+  if (mode === 'bubble') {
+    overlayWindow.innerHTML = `
+      <div class="cps-header">
+        <div class="cps-title">Welcome to ProblemSolver ✨</div>
+        <div class="cps-controls">
+          <button class="cps-btn cps-close" title="Close">×</button>
+        </div>
+      </div>
+      <div class="cps-bubble-content">
+        <div class="cps-bubble-input-wrapper">
+          <input 
+            type="text" 
+            class="cps-bubble-input" 
+            placeholder="search anything!"
+            id="bubble-text-input"
+          />
+          <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
+        </div>
+        <button class="cps-bubble-upload-btn" id="bubble-upload-btn">Upload image</button>
+        <input type="file" accept="image/*" id="bubble-file-input" style="display: none;" />
+        <div class="cps-bubble-dropzone" id="bubble-dropzone">
+          Drag & drop an image to analyze instantly
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(overlayWindow);
+    setupWindowControls();
+    setupWelcomeBubbleDragDrop();
+    setupWelcomeBubbleSubmit();
+  } else {
+    overlayWindow.innerHTML = `
+      <div class="cps-header">
+        <div class="cps-title">Chrome Problem Solver</div>
+        <div class="cps-controls">
+          <button class="cps-btn cps-minimize" title="Minimize">−</button>
+          <button class="cps-btn cps-close" title="Close">×</button>
+        </div>
+      </div>
+      <div class="cps-tabs">
+        <button class="cps-tab active" data-tab="main">Analysis</button>
+        <button class="cps-tab" data-tab="history">History</button>
+      </div>
+      <div class="cps-content">
+        <div class="cps-tab-content active" data-content="main">
+          <div class="cps-response-area"></div>
+          <div class="cps-confidence">
+            <div class="cps-confidence-label">Confidence</div>
+            <div class="cps-confidence-bar">
+              <div class="cps-confidence-fill"></div>
+            </div>
+            <div class="cps-confidence-percentage">0%</div>
+          </div>
+          <div class="cps-followup">
+            <div class="cps-followup-input-wrapper">
+              <textarea 
+                class="cps-followup-input" 
+                placeholder="Ask a follow up or clarification!"
+                maxlength="500"
+                rows="2"
+              ></textarea>
+              <div class="cps-word-count">0/50 words</div>
+            </div>
+            <button class="cps-send-btn" id="send-followup">Send</button>
+          </div>
+          <div class="cps-feedback">
+            <button class="cps-feedback-btn cps-like" title="Like">👍</button>
+            <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
+          </div>
+        </div>
+        <div class="cps-tab-content" data-content="history">
+          <div class="cps-history-list"></div>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(overlayWindow);
+    setupWindowControls();
+    setupTabs();
+    setupFeedback();
+    setupFollowUp();
+  }
 }
 
 // Setup window controls
@@ -579,8 +627,15 @@ function saveFeedback(type, comment = '') {
 
 // Display loading state
 function displayLoading() {
-  const responseArea = overlayWindow.querySelector('.cps-response-area');
-  const confidenceSection = overlayWindow.querySelector('.cps-confidence');
+  // Ensure we're in analysis mode
+  if (overlayMode !== 'analysis' && overlayWindow) {
+    morphToAnalysisMode();
+  }
+  
+  const responseArea = overlayWindow?.querySelector('.cps-response-area');
+  const confidenceSection = overlayWindow?.querySelector('.cps-confidence');
+  
+  if (!responseArea) return;
   
   responseArea.innerHTML = `
     <div class="cps-loading">
@@ -599,7 +654,10 @@ function displayLoading() {
   }
   
   // Switch to main tab
-  overlayWindow.querySelector('[data-tab="main"]').click();
+  const mainTab = overlayWindow.querySelector('[data-tab="main"]');
+  if (mainTab) {
+    mainTab.click();
+  }
 }
 
 // Display response
@@ -820,6 +878,261 @@ function displayHistoryItem(item) {
   }
   
   overlayWindow.querySelector('[data-tab="main"]').click();
+}
+
+// Show Welcome Bubble
+function showWelcomeBubble() {
+  if (!overlayWindow) {
+    createOverlayWindow('bubble');
+  } else {
+    // Morph existing overlay to bubble mode
+    morphToBubbleMode();
+  }
+  
+  // Remove hidden and minimized classes to show the window
+  overlayWindow.classList.remove('hidden');
+  overlayWindow.classList.remove('minimized');
+  isMinimized = false;
+  
+  // Restore size/position from storage
+  restoreWindowState();
+}
+
+// Handle Welcome Bubble hotkey
+function handleWelcomeBubbleHotkey() {
+  showWelcomeBubble();
+}
+
+// Morph overlay to bubble mode
+function morphToBubbleMode() {
+  if (!overlayWindow) return;
+  
+  overlayMode = 'bubble';
+  overlayWindow.className = 'cps-mode-bubble';
+  overlayWindow.innerHTML = `
+    <div class="cps-header">
+      <div class="cps-title">Welcome to ProblemSolver ✨</div>
+      <div class="cps-controls">
+        <button class="cps-btn cps-close" title="Close">×</button>
+      </div>
+    </div>
+    <div class="cps-bubble-content">
+      <div class="cps-bubble-input-wrapper">
+        <input 
+          type="text" 
+          class="cps-bubble-input" 
+          placeholder="search anything!"
+          id="bubble-text-input"
+        />
+        <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
+      </div>
+      <button class="cps-bubble-upload-btn" id="bubble-upload-btn">Upload image</button>
+      <input type="file" accept="image/*" id="bubble-file-input" style="display: none;" />
+      <div class="cps-bubble-dropzone" id="bubble-dropzone">
+        Drag & drop an image to analyze instantly
+      </div>
+    </div>
+  `;
+  
+  setupWindowControls();
+  setupWelcomeBubbleDragDrop();
+  setupWelcomeBubbleSubmit();
+}
+
+// Morph overlay to analysis mode
+function morphToAnalysisMode() {
+  if (!overlayWindow) return;
+  
+  overlayMode = 'analysis';
+  overlayWindow.className = 'cps-mode-analysis';
+  overlayWindow.innerHTML = `
+    <div class="cps-header">
+      <div class="cps-title">Chrome Problem Solver</div>
+      <div class="cps-controls">
+        <button class="cps-btn cps-minimize" title="Minimize">−</button>
+        <button class="cps-btn cps-close" title="Close">×</button>
+      </div>
+    </div>
+    <div class="cps-tabs">
+      <button class="cps-tab active" data-tab="main">Analysis</button>
+      <button class="cps-tab" data-tab="history">History</button>
+    </div>
+    <div class="cps-content">
+      <div class="cps-tab-content active" data-content="main">
+        <div class="cps-response-area"></div>
+        <div class="cps-confidence">
+          <div class="cps-confidence-label">Confidence</div>
+          <div class="cps-confidence-bar">
+            <div class="cps-confidence-fill"></div>
+          </div>
+          <div class="cps-confidence-percentage">0%</div>
+        </div>
+        <div class="cps-followup">
+          <div class="cps-followup-input-wrapper">
+            <textarea 
+              class="cps-followup-input" 
+              placeholder="Ask a follow up or clarification!"
+              maxlength="500"
+              rows="2"
+            ></textarea>
+            <div class="cps-word-count">0/50 words</div>
+          </div>
+          <button class="cps-send-btn" id="send-followup">Send</button>
+        </div>
+        <div class="cps-feedback">
+          <button class="cps-feedback-btn cps-like" title="Like">👍</button>
+          <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
+        </div>
+      </div>
+      <div class="cps-tab-content" data-content="history">
+        <div class="cps-history-list"></div>
+      </div>
+    </div>
+  `;
+  
+  setupWindowControls();
+  setupTabs();
+  setupFeedback();
+  setupFollowUp();
+}
+
+// Setup Welcome Bubble drag & drop
+function setupWelcomeBubbleDragDrop() {
+  const dropzone = overlayWindow.querySelector('#bubble-dropzone');
+  const fileInput = overlayWindow.querySelector('#bubble-file-input');
+  
+  if (!dropzone) return;
+  
+  // Prevent default drag behaviors
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  
+  // Highlight drop zone on drag enter/over
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropzone.addEventListener(eventName, () => {
+      dropzone.classList.add('cps-drag-active');
+    });
+  });
+  
+  // Remove highlight on drag leave
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('cps-drag-active');
+  });
+  
+  // Handle file drop
+  dropzone.addEventListener('drop', (e) => {
+    dropzone.classList.remove('cps-drag-active');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleImageFile(files[0]);
+    }
+  });
+  
+  // Click on dropzone to trigger file input
+  dropzone.addEventListener('click', () => {
+    fileInput.click();
+  });
+  
+  // Handle file input change
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleImageFile(e.target.files[0]);
+      }
+    });
+  }
+}
+
+// Setup Welcome Bubble submit handlers
+function setupWelcomeBubbleSubmit() {
+  const textInput = overlayWindow.querySelector('#bubble-text-input');
+  const goBtn = overlayWindow.querySelector('#bubble-go-btn');
+  const uploadBtn = overlayWindow.querySelector('#bubble-upload-btn');
+  const fileInput = overlayWindow.querySelector('#bubble-file-input');
+  
+  // Go button click
+  if (goBtn) {
+    goBtn.addEventListener('click', () => {
+      handleWelcomeBubbleSubmit();
+    });
+  }
+  
+  // Enter key in text input
+  if (textInput) {
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleWelcomeBubbleSubmit();
+      }
+    });
+  }
+  
+  // Upload button click
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+  }
+}
+
+// Handle Welcome Bubble submission
+function handleWelcomeBubbleSubmit(text = null, imageData = null) {
+  const textInput = overlayWindow.querySelector('#bubble-text-input');
+  const inputText = text || (textInput ? textInput.value.trim() : '');
+  
+  if (!inputText && !imageData) {
+    // No input provided
+    return;
+  }
+  
+  // Reset thread for new conversation
+  currentThread = null;
+  
+  // Morph to analysis mode
+  morphToAnalysisMode();
+  
+  // Display loading state
+  displayLoading();
+  
+  // Process image if provided
+  if (imageData) {
+    if (typeof imageData === 'string' && !imageData.startsWith('data:')) {
+      // Convert image URL to base64
+      convertImageToBase64(imageData).then(base64 => {
+        sendAnalysisRequest(inputText || 'Analyze this image', base64);
+      }).catch(() => {
+        sendAnalysisRequest(inputText || 'Analyze this image', imageData);
+      });
+    } else {
+      sendAnalysisRequest(inputText || 'Analyze this image', imageData);
+    }
+  } else {
+    sendAnalysisRequest(inputText);
+  }
+}
+
+// Handle image file
+function handleImageFile(file) {
+  // Check if it's an image
+  if (!file.type.startsWith('image/')) {
+    alert('Please select an image file.');
+    return;
+  }
+  
+  // Convert file to base64
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const base64 = e.target.result;
+    handleWelcomeBubbleSubmit(null, base64);
+  };
+  reader.onerror = () => {
+    alert('Error reading image file.');
+  };
+  reader.readAsDataURL(file);
 }
 
 // Save window state
