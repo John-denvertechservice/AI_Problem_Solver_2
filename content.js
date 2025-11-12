@@ -352,7 +352,7 @@ function createOverlayWindow(mode = 'analysis') {
           <input 
             type="text" 
             class="cps-bubble-input" 
-            placeholder="search anything!"
+            placeholder="ask anything!"
             id="bubble-text-input"
           />
           <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
@@ -366,9 +366,12 @@ function createOverlayWindow(mode = 'analysis') {
     `;
     
     document.body.appendChild(overlayWindow);
-    setupWindowControls();
-    setupWelcomeBubbleDragDrop();
-    setupWelcomeBubbleSubmit();
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+      setupWindowControls();
+      setupWelcomeBubbleDragDrop();
+      setupWelcomeBubbleSubmit();
+    }, 0);
   } else {
     overlayWindow.innerHTML = `
       <div class="cps-header">
@@ -428,22 +431,26 @@ function setupWindowControls() {
   const minimizeBtn = overlayWindow.querySelector('.cps-minimize');
   const closeBtn = overlayWindow.querySelector('.cps-close');
   
-  minimizeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (isMinimized) {
-      overlayWindow.classList.remove('minimized');
-      isMinimized = false;
-    } else {
-      overlayWindow.classList.add('minimized');
-      isMinimized = true;
-    }
-    saveWindowState();
-  });
+  if (minimizeBtn) {
+    minimizeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isMinimized) {
+        overlayWindow.classList.remove('minimized');
+        isMinimized = false;
+      } else {
+        overlayWindow.classList.add('minimized');
+        isMinimized = true;
+      }
+      saveWindowState();
+    });
+  }
   
-  closeBtn.addEventListener('click', () => {
-    overlayWindow.classList.add('hidden');
-    saveWindowState();
-  });
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      overlayWindow.classList.add('hidden');
+      saveWindowState();
+    });
+  }
 }
 
 // Setup tabs
@@ -921,7 +928,7 @@ function morphToBubbleMode() {
         <input 
           type="text" 
           class="cps-bubble-input" 
-          placeholder="search anything!"
+          placeholder="ask anything!"
           id="bubble-text-input"
         />
         <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
@@ -934,9 +941,12 @@ function morphToBubbleMode() {
     </div>
   `;
   
-  setupWindowControls();
-  setupWelcomeBubbleDragDrop();
-  setupWelcomeBubbleSubmit();
+  // Use setTimeout to ensure DOM is ready
+  setTimeout(() => {
+    setupWindowControls();
+    setupWelcomeBubbleDragDrop();
+    setupWelcomeBubbleSubmit();
+  }, 0);
 }
 
 // Morph overlay to analysis mode
@@ -1034,7 +1044,9 @@ function setupWelcomeBubbleDragDrop() {
   
   // Click on dropzone to trigger file input
   dropzone.addEventListener('click', () => {
-    fileInput.click();
+    if (fileInput) {
+      fileInput.click();
+    }
   });
   
   // Handle file input change
