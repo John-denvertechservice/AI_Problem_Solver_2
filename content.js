@@ -29,11 +29,14 @@ function init() {
         handleSelection();
       }
       sendResponse({ success: true });
+      return true; // Keep channel open for async response
     } else if (request.action === 'welcome-bubble') {
       handleWelcomeBubbleHotkey();
       sendResponse({ success: true });
+      return true; // Keep channel open for async response
     }
-    return true; // Keep channel open for async response
+    // Don't return true for unhandled messages - let other listeners handle them
+    return false;
   });
   
   // In-page hotkey fallback
