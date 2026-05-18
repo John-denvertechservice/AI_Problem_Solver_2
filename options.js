@@ -1,20 +1,20 @@
 // Chrome Problem Solver - Options Page Script
 
 const OPENAI_MODELS = {
-  'gpt-4o-mini': 'GPT-4o Mini',
-  'gpt-4o': 'GPT-4o',
-  'gpt-4-turbo': 'GPT-4 Turbo'
+  'gpt-4.1-nano': 'GPT-4.1 Nano',
+  'gpt-4.1-mini': 'GPT-4.1 Mini',
+  'gpt-4.1': 'GPT-4.1'
 };
 
 const CLAUDE_MODELS = {
-  'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
-  'claude-3-5-haiku-20241022': 'Claude 3.5 Haiku',
-  'claude-3-opus-20240229': 'Claude 3 Opus'
+  'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-opus-4-7': 'Claude Opus 4.7'
 };
 
 let currentSettings = {
   provider: 'openai',
-  model: 'gpt-4o-mini',
+  model: 'gpt-4.1-mini',
   openaiKey: '',
   claudeKey: ''
 };

@@ -4,7 +4,7 @@
 // Default settings
 const DEFAULT_SETTINGS = {
   provider: 'openai',
-  model: 'gpt-4o-mini',
+  model: 'gpt-4.1-mini',
   openaiKey: '',
   claudeKey: '',
   temperature: 0.2
@@ -12,16 +12,16 @@ const DEFAULT_SETTINGS = {
 
 // OpenAI Models
 const OPENAI_MODELS = {
-  'gpt-4o-mini': { name: 'GPT-4o Mini', vision: false },
-  'gpt-4o': { name: 'GPT-4o', vision: true },
-  'gpt-4-turbo': { name: 'GPT-4 Turbo', vision: true }
+  'gpt-4.1-nano': { name: 'GPT-4.1 Nano', vision: true },
+  'gpt-4.1-mini': { name: 'GPT-4.1 Mini', vision: true },
+  'gpt-4.1': { name: 'GPT-4.1', vision: true }
 };
 
 // Claude Models
 const CLAUDE_MODELS = {
-  'claude-3-5-sonnet-20241022': { name: 'Claude 3.5 Sonnet', vision: true },
-  'claude-3-5-haiku-20241022': { name: 'Claude 3.5 Haiku', vision: true },
-  'claude-3-opus-20240229': { name: 'Claude 3 Opus', vision: true }
+  'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', vision: true },
+  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', vision: true },
+  'claude-opus-4-7': { name: 'Claude Opus 4.7', vision: true }
 };
 
 // Initialize context menu
@@ -166,7 +166,7 @@ function getTemperature(contentType) {
 async function callOpenAI(text, contentType, imageData = null, conversationContext = []) {
   const settings = await getSettings();
   const apiKey = settings.openaiKey;
-  const model = settings.model || 'gpt-4o-mini';
+  const model = settings.model || 'gpt-4.1-mini';
   
   if (!apiKey) {
     throw new Error('OpenAI API key not configured');
@@ -250,7 +250,7 @@ async function callOpenAI(text, contentType, imageData = null, conversationConte
 async function callOpenAIStream(text, contentType, imageData = null, conversationContext = [], tabId) {
   const settings = await getSettings();
   const apiKey = settings.openaiKey;
-  const model = settings.model || 'gpt-4o-mini';
+  const model = settings.model || 'gpt-4.1-mini';
   
   if (!apiKey) {
     throw new Error('OpenAI API key not configured');
@@ -377,7 +377,7 @@ async function callOpenAIStream(text, contentType, imageData = null, conversatio
 async function callClaude(text, contentType, imageData = null, conversationContext = []) {
   const settings = await getSettings();
   const apiKey = settings.claudeKey;
-  const model = settings.model || 'claude-3-5-sonnet-20241022';
+  const model = settings.model || 'claude-sonnet-4-6';
   
   if (!apiKey) {
     throw new Error('Claude API key not configured');
@@ -475,7 +475,7 @@ async function callClaude(text, contentType, imageData = null, conversationConte
 async function callClaudeStream(text, contentType, imageData = null, conversationContext = [], tabId) {
   const settings = await getSettings();
   const apiKey = settings.claudeKey;
-  const model = settings.model || 'claude-3-5-sonnet-20241022';
+  const model = settings.model || 'claude-sonnet-4-6';
   
   if (!apiKey) {
     throw new Error('Claude API key not configured');
