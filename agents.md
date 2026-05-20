@@ -72,8 +72,8 @@ Chrome Problem Solver/
 
 - **Manifest Version**: V3 (Modern Chrome extension architecture)
 - **AI Providers**: 
-  - OpenAI API (GPT-5 Mini, GPT-5 Nano, GPT-4o)
-  - Claude API (Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus)
+  - OpenAI API (GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1)
+  - Claude API (Claude Haiku 4.5, Claude Sonnet 4.6, Claude Opus 4.7)
 - **Storage**: Chrome sync storage for API keys and settings
 - **Architecture**: Content scripts + Background service worker
 
@@ -187,12 +187,12 @@ The extension follows a structured decision tree to ensure consistent AI respons
 ## API Integration
 
 ### OpenAI API
-- **Models**: GPT-5 Mini (default), GPT-5 Nano, GPT-4o
+- **Models**: GPT-4.1 Mini (default), GPT-4.1 Nano, GPT-4.1
 - **Vision**: GPT-4o for image analysis
 - **Endpoint**: Direct API calls from background service worker
 
 ### Claude API
-- **Models**: Claude 3.5 Sonnet (default), Claude 3.5 Haiku, Claude 3 Opus
+- **Models**: Claude Sonnet 4.6 (default), Claude Haiku 4.5, Claude Opus 4.7
 - **Vision**: All Claude models support image analysis
 - **Beta Features**: Latest API capabilities with enhanced tool usage
 - **Endpoint**: Direct API calls from background service worker
