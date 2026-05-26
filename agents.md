@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Chrome Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages ChatGPT and Claude AI to deliver contextually aware, well-formatted responses with excellent performance.
+**Chrome Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages the OpenAI and Anthropic Claude APIs to deliver contextually aware, well-formatted responses.
 
 ## Project Status
 
@@ -56,24 +56,33 @@
 ### Core Components
 
 ```
-Chrome Problem Solver/
+Chrome_Problem_Solver2/
 ├── manifest.json          # Extension configuration (Manifest V3)
-├── background.js          # Service worker for AI API calls
-├── content.js            # Content script for UI and text selection
-├── content.css           # Styling for overlay interface
-├── popup.html            # Extension popup interface
-├── popup.js              # Popup functionality
-├── options.html          # Settings page
-├── options.js            # Settings functionality
-└── README.md             # Project documentation
+├── background.js          # Service worker: AI API calls, decision tree, streaming, usage tracking
+├── content.js             # Content script: overlay UI, text/image selection, follow-up conversation
+├── content.css            # Styling for the overlay interface
+├── popup.html             # Toolbar popup interface
+├── popup.js               # Popup functionality
+├── popup.css              # Popup styling
+├── options.html           # Settings page
+├── options.js             # Settings functionality (provider/model/key management)
+├── options.css            # Settings page styling
+├── analytics.html         # Usage analytics dashboard
+├── analytics.js           # Analytics dashboard logic (reads chrome.storage.local usage data)
+├── analytics.css          # Analytics dashboard styling
+├── icons/                 # Extension icons (icon16/48/128.png)
+├── agents.md              # This agent collaboration guide
+├── README.md              # User-facing project documentation
+├── LICENSE                # MIT license
+└── .gitignore             # Git ignore rules
 ```
 
 ### Technical Stack
 
 - **Manifest Version**: V3 (Modern Chrome extension architecture)
 - **AI Providers**: 
-  - OpenAI API (GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1)
-  - Claude API (Claude Haiku 4.5, Claude Sonnet 4.6, Claude Opus 4.7)
+  - OpenAI API (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano)
+  - Claude API (Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5)
 - **Storage**: Chrome sync storage for API keys and settings
 - **Architecture**: Content scripts + Background service worker
 
@@ -127,18 +136,32 @@ The extension follows a structured decision tree to ensure consistent AI respons
 
 ### AI Configuration
 
-- **Temperature**: Optimized for accuracy (0.0 for math, 0.2 for general)
-- **Token Limits**: Up to 2000 tokens for comprehensive responses
-- **Context**: Intelligent prompt engineering for different content types
-- **Vision**: High-detail image analysis with both OpenAI and Claude models
+- **Temperature**: `0.0` for math problems, `0.2` for everything else (`getTemperature()` in `background.js`)
+- **Token Limits**: `max_tokens: 2000` on every request
+- **Context**: Per-content-type system/user prompts built by `buildPrompt()`; follow-up turns skip content-type detection and are treated as questions
+- **Vision**: Image analysis supported on all OpenAI and Claude models (sent as `image_url` for OpenAI, base64 `image` blocks for Claude)
+- **Streaming**: Both providers support streamed responses (`callOpenAIStream` / `callClaudeStream`). Chunks are relayed to the content script via `streamChunk` → `streamComplete`/`streamFinal` messages; a non-streaming path (`callOpenAI` / `callClaude`) also exists.
+- **Conversation context**: Prior turns are passed back to the API as `conversationContext`, enabling multi-turn follow-ups within a session.
+
+### Confidence Scoring
+
+`calculateConfidence()` in `background.js` returns a heuristic 0–100 score (clamped to 50–95), surfaced in the overlay:
+- Base score: **70**
+- Math answer with a clear "Final Answer"/numeric result: **90**
+- Substantial code analysis (response > 100 chars): **85**
+- Very short response to long-text input: **60**
+
+> This is a heuristic based on response shape, **not** a model-reported probability. Don't describe it as the model's actual certainty.
 
 ## User Interface
 
-### Hotkey Activation
-- **macOS**: Shift+Alt+A (Option key)
-- **Windows/Linux**: Shift+Alt+A
-- **Fallback**: In-page hotkey that works when page is focused
-- **Behavior**: Opens window pane in bottom-right corner when text/image is selected
+### Activation Triggers
+The extension can be invoked four ways (all defined in `manifest.json` and wired up in `background.js`):
+- **Analyze hotkey**: `Alt+Shift+A` (the `analyze-selection` command) — analyzes the current text/image selection. On macOS, Alt is the Option key.
+- **Welcome bubble hotkey**: `Alt+Shift+K` (the `welcome-bubble` command) — opens the welcome bubble.
+- **Context menu**: Right-click → "Analyze with Chrome Problem Solver" (available on selection, image, and page contexts).
+- **Toolbar icon**: Clicking the extension's toolbar icon analyzes the current selection.
+- **Behavior**: Opens the overlay pane in the bottom-right corner. The background worker only messages `http(s)://` and `file://` tabs, so triggers are silently ignored on `chrome://` and Web Store pages.
 
 ### Window Pane Features
 - Scalable (resizable)
@@ -163,11 +186,11 @@ The extension follows a structured decision tree to ensure consistent AI respons
 - Ensure CSP compliance (no external script loading)
 
 ### Security
-- **No external dependencies**: Self-contained extension
-- **Secure API calls**: Direct communication with OpenAI and Claude APIs
-- **Local storage**: API keys stored securely in Chrome sync
+- **No external dependencies**: Self-contained extension; no third-party scripts loaded
+- **HTTPS API calls**: Requests go directly from the background service worker to `api.openai.com` and `api.anthropic.com` over TLS (`host_permissions` are scoped to just these two origins)
+- **Key storage**: API keys and settings live in `chrome.storage.sync`. This keeps them on the user's machine(s) and out of any server we control, but `chrome.storage.sync` is **not encrypted at rest** — do not describe the keys as "encrypted" or "secure storage." Treat them as plaintext local data that Chrome syncs across the user's signed-in browsers.
 - **CSP compliant**: No external script loading
-- **Privacy**: No data collection, only sends selected text to AI APIs
+- **Privacy**: No first-party data collection; only the user's selected text/image is sent to the chosen provider
 
 ### Testing
 1. Load the extension in developer mode
@@ -187,35 +210,35 @@ The extension follows a structured decision tree to ensure consistent AI respons
 ## API Integration
 
 ### OpenAI API
-- **Models**: GPT-4.1 Mini (default), GPT-4.1 Nano, GPT-4.1
-- **Vision**: GPT-4o for image analysis
-- **Endpoint**: Direct API calls from background service worker
+- **Models**: `gpt-4.1-mini` (GPT-4.1 Mini, default), `gpt-4.1-nano` (GPT-4.1 Nano), `gpt-4.1` (GPT-4.1)
+- **Vision**: All three models support image analysis
+- **Endpoint**: `POST https://api.openai.com/v1/chat/completions`, called from the background service worker
 
 ### Claude API
-- **Models**: Claude Sonnet 4.6 (default), Claude Haiku 4.5, Claude Opus 4.7
+- **Models**: `claude-sonnet-4-6` (Claude Sonnet 4.6, default fallback), `claude-haiku-4-5-20251001` (Claude Haiku 4.5), `claude-opus-4-7` (Claude Opus 4.7)
 - **Vision**: All Claude models support image analysis
-- **Beta Features**: Latest API capabilities with enhanced tool usage
-- **Endpoint**: Direct API calls from background service worker
+- **Endpoint**: `POST https://api.anthropic.com/v1/messages`, called from the background service worker
+- **API version header**: `anthropic-version: 2023-06-01`; uses `anthropic-dangerous-direct-browser-access` for direct calls from the worker
+
+> **Note**: The extension's default provider is OpenAI with `gpt-4.1-mini`. Each provider's call site falls back to its own default model (`gpt-4.1-mini` for OpenAI, `claude-sonnet-4-6` for Claude) if none is selected. Model IDs are defined in `background.js` and `options.js` — keep both in sync when adding or changing models.
 
 ### API Key Management
-- Stored in Chrome sync storage
-- User-configurable in settings
-- Secure, local-only storage
-- No transmission to third parties
+- Stored in `chrome.storage.sync` under the `settings` object (`openaiKey` / `claudeKey`)
+- User-configurable in the options page (keys are masked in the UI but stored as plaintext)
+- Not encrypted at rest; Chrome syncs them across the user's signed-in browsers
+- Never transmitted to any third party other than the provider's own API endpoint
 
 ## Data Storage
 
-### Local Storage
-- Usage tracking data
-- User preferences
-- Feedback data
-- Visualization data
-- All stored locally (no cloud sync for user data)
+### `chrome.storage.local` (device-only, not synced)
+- Usage tracking and analytics (`usage` object: request counts, average response time, breakdowns by provider/model/content type)
+- Rolling request history (last 100 entries)
+- Feedback data from the like/dislike buttons
+- Cleared by the "Clear Data" button on the options page; exportable as JSON via "Export Data"
 
-### Chrome Sync Storage
-- API keys (encrypted)
-- Extension settings
-- User preferences
+### `chrome.storage.sync` (synced across the user's signed-in Chrome browsers)
+- API keys (`openaiKey`, `claudeKey`) — stored as plaintext, **not encrypted**
+- Extension settings: selected `provider`, `model`, and the `trackUsage` preference
 
 ## Collaboration Guidelines
 
@@ -289,6 +312,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Last Updated**: Based on current project state as of initial repository setup
+**Last Updated**: 2026-05-26 — reconciled model lists, provider naming, storage/security claims, file tree, and feature coverage with the actual code (`background.js`, `options.js`, `manifest.json`)
+**Extension Version**: 1.0.0 (see `manifest.json`)
 **Maintainer**: John-denvertechservice
 **Project Status**: Active Development

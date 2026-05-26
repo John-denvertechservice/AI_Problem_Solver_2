@@ -108,9 +108,9 @@ function updateModelSelector() {
   
   // Update hint
   if (currentSettings.provider === 'openai') {
-    modelHint.textContent = 'GPT-4.1 Mini is recommended for fast responses. All models support vision.';
+    modelHint.textContent = 'GPT-4.1 Mini is recommended for fast responses. All GPT-4.1 models support vision.';
   } else {
-    modelHint.textContent = 'Claude Sonnet 4.6 is recommended for best accuracy. All models support vision.';
+    modelHint.textContent = 'Claude Sonnet 4.6 is recommended for best accuracy. All Claude models support vision.';
   }
   
   // Listen for model changes

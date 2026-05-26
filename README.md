@@ -4,7 +4,7 @@ An AI-powered Chrome extension that provides accurate, user-friendly assistance 
 
 ## Features
 
-- **AI-Powered Analysis**: Supports both OpenAI (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano) and Claude (Sonnet 4.6, Haiku 4.5, Opus 4.7) models
+- **AI-Powered Analysis**: Supports both OpenAI (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano) and Claude (Opus 4.7, Sonnet 4.6, Haiku 4.5) models
 - **Smart Decision Tree**: Automatically detects content type (math, code, questions, etc.) and formats responses accordingly
 - **Image Analysis**: Analyze images, charts, and screenshots using vision APIs
 - **Beautiful UI**: Chrome-inspired shiny, modern design with glossy surfaces
@@ -77,11 +77,11 @@ The extension follows a structured decision tree:
 
 ## Privacy
 
-- All data stored locally (no cloud sync)
-- API keys stored securely in Chrome sync storage
-- No external dependencies
-- No data collection beyond usage statistics
-- Only selected text/images sent to AI APIs
+- Usage statistics and history stay on your device (`chrome.storage.local`); they are never uploaded to us
+- API keys and settings are kept in `chrome.storage.sync`, so Chrome syncs them across the browsers where you're signed in. They are **not** sent to any server we control, but note that `chrome.storage.sync` is **not encrypted at rest** — treat the keys as plaintext on your machine(s)
+- No external dependencies and no third-party analytics
+- The only network calls are HTTPS requests to the OpenAI and Anthropic APIs you configure
+- Only the text/image you select is sent to your chosen AI provider
 
 ## License
 
