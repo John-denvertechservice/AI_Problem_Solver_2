@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **This is the quick operational reference** — how to load, test, and orient in the code. For the comprehensive guide (full model IDs and endpoints, detailed decision-tree rules, storage internals, confidence scoring, troubleshooting, and collaboration guidelines), see **[agents.md](agents.md)**. Where the two overlap, agents.md is canonical for deep detail; this file stays intentionally brief.
+
 ## What This Is
 
 A Chrome extension (Manifest V3) that injects an AI-powered overlay onto any webpage. Users select text or images and get AI analysis via OpenAI or Anthropic APIs. No build step — the extension loads directly from source files.
@@ -36,7 +38,7 @@ To test keyboard shortcuts: `chrome://extensions/shortcuts`
 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'
 ```
 
-When adding new models, update the model maps in **both** `background.js` and `options.js`.
+When adding new models, update the model maps in **both** `background.js` and `options.js`. Full model IDs with display names, default fallbacks, and endpoints live in [agents.md → API Integration](agents.md#api-integration).
 
 ## Decision Tree (background.js)
 
@@ -48,7 +50,7 @@ When adding new models, update the model maps in **both** `background.js` and `o
 | Code, long text (>75 words), statements | No |
 | Images without text | No |
 
-Follow-up messages bypass classification and use `isQuestion: true`.
+Follow-up messages bypass classification and use `isQuestion: true`. For the per-content-type prompt rules and formatting expectations, see [agents.md → Decision Tree Behavior](agents.md#decision-tree-behavior).
 
 ## Key Constraints
 

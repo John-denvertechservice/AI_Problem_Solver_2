@@ -4,6 +4,8 @@
 
 **Chrome Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages the OpenAI and Anthropic Claude APIs to deliver contextually aware, well-formatted responses.
 
+> **This is the comprehensive reference.** For a quick start — how to load and test the unpacked extension, the `content.js` → `background.js` → API message flow, and the core code-level constraints — see **[CLAUDE.md](CLAUDE.md)**. This guide goes deeper on features, the decision tree, API integration, storage, and collaboration; CLAUDE.md is the fast orientation.
+
 ## Project Status
 
 ### ✅ What's Working Well
@@ -193,7 +195,7 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 - **Privacy**: No first-party data collection; only the user's selected text/image is sent to the chosen provider
 
 ### Testing
-1. Load the extension in developer mode
+1. Load the unpacked extension and reload after changes — see [CLAUDE.md → Loading / Testing](CLAUDE.md#loading--testing)
 2. Test on various websites with different content types
 3. Verify API key configuration works
 4. Test keyboard shortcuts and UI interactions
