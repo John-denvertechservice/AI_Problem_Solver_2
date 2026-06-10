@@ -1,7 +1,39 @@
 /* Chrome Problem Solver - Content CSS */
 /* Chrome-inspired shiny, modern, spacey design with glossy surfaces */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Inter is bundled locally rather than imported from Google Fonts.
+   In a content script, a remote @import is blocked by many pages' CSP, so the
+   font never loads and text falls back to the OS default (Segoe UI on Windows,
+   San Francisco on macOS) — looking different per platform. Local files render
+   identically everywhere. The fonts/ dir must be in web_accessible_resources. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/inter-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('fonts/inter-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('fonts/inter-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/inter-latin-700-normal.woff2') format('woff2');
+}
 
 :root {
   --cps-bg-primary: #1a1a2e;
@@ -247,6 +279,107 @@
   color: var(--cps-chrome-blue-light);
 }
 
+/* ── Rendered markdown (marked + highlight.js + KaTeX) ───────────────────────
+   Applies to both the single response and conversation-thread bubbles. */
+.cps-response, .cps-message-content {
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cps-response h1, .cps-response h2, .cps-response h3,
+.cps-response h4, .cps-response h5, .cps-response h6,
+.cps-message-content h1, .cps-message-content h2, .cps-message-content h3,
+.cps-message-content h4, .cps-message-content h5, .cps-message-content h6 {
+  margin: 14px 0 8px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--cps-text-primary);
+}
+.cps-response h1, .cps-message-content h1 { font-size: 20px; }
+.cps-response h2, .cps-message-content h2 { font-size: 18px; }
+.cps-response h3, .cps-message-content h3 { font-size: 16px; }
+.cps-response h4, .cps-response h5, .cps-response h6,
+.cps-message-content h4, .cps-message-content h5, .cps-message-content h6 { font-size: 14px; }
+
+.cps-response p, .cps-message-content p { margin: 8px 0; }
+.cps-response ul, .cps-response ol,
+.cps-message-content ul, .cps-message-content ol { margin: 8px 0; padding-left: 22px; }
+.cps-response li, .cps-message-content li { margin: 4px 0; }
+
+.cps-response a, .cps-message-content a {
+  color: var(--cps-chrome-blue-light);
+  text-decoration: none;
+}
+.cps-response a:hover, .cps-message-content a:hover { text-decoration: underline; }
+
+.cps-response blockquote, .cps-message-content blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--cps-chrome-blue);
+  background: rgba(66, 133, 244, 0.08);
+  color: var(--cps-text-secondary);
+}
+
+.cps-response hr, .cps-message-content hr {
+  border: none;
+  border-top: 1px solid var(--cps-border);
+  margin: 14px 0;
+}
+
+.cps-response img, .cps-message-content img { max-width: 100%; border-radius: 6px; }
+
+/* Code blocks — let the highlight.js theme own the colors; we set the chrome. */
+.cps-response pre, .cps-message-content pre {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--cps-border);
+}
+.cps-response pre code, .cps-message-content pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cps-message-content code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--cps-chrome-blue-light);
+}
+
+/* Tables (GFM) */
+.cps-response table, .cps-message-content table {
+  border-collapse: collapse;
+  margin: 10px 0;
+  width: 100%;
+  font-size: 13px;
+}
+.cps-response th, .cps-response td,
+.cps-message-content th, .cps-message-content td {
+  border: 1px solid var(--cps-border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.cps-response th, .cps-message-content th {
+  background: rgba(66, 133, 244, 0.12);
+  font-weight: 600;
+}
+
+/* KaTeX: keep long display equations scrollable instead of overflowing. */
+.cps-response .katex-display, .cps-message-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+  margin: 8px 0;
+}
+
 .cps-error {
   color: var(--cps-error);
   padding: 12px;
@@ -259,6 +392,55 @@
   color: var(--cps-text-secondary);
   padding: 12px;
   text-align: center;
+}
+
+.cps-stopped {
+  color: var(--cps-text-secondary);
+  font-style: italic;
+}
+
+/* Response Actions (Stop / Copy / Regenerate) */
+.cps-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.cps-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  color: var(--cps-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--cps-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cps-action-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.cps-action-btn:active {
+  transform: translateY(0);
+}
+
+.cps-action-btn.cps-stop {
+  color: var(--cps-error);
+  background: rgba(244, 67, 54, 0.12);
+  border-color: rgba(244, 67, 54, 0.3);
+}
+
+.cps-action-btn.cps-stop:hover {
+  background: rgba(244, 67, 54, 0.2);
 }
 
 /* Loading State */
@@ -900,6 +1082,46 @@
               height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
               opacity 0.3s ease,
               transform 0.3s ease;
+}
+
+/* Drag & Resize */
+.cps-header {
+  cursor: move;
+  user-select: none;
+}
+
+/* While actively dragging/resizing, kill the size/transform transitions so the
+   overlay tracks the cursor instead of lagging behind it. */
+#chrome-problem-solver-overlay.cps-dragging,
+#chrome-problem-solver-overlay.cps-resizing {
+  transition: none !important;
+}
+#chrome-problem-solver-overlay.cps-dragging,
+#chrome-problem-solver-overlay.cps-dragging .cps-header {
+  cursor: grabbing;
+}
+
+.cps-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 2;
+  background:
+    linear-gradient(135deg, transparent 0 50%, rgba(255, 255, 255, 0.5) 50% 60%, transparent 60% 70%, rgba(255, 255, 255, 0.5) 70% 80%, transparent 80%);
+  border-bottom-right-radius: 14px;
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+.cps-resize-handle:hover {
+  opacity: 0.9;
+}
+
+/* No resize grip while minimized. */
+#chrome-problem-solver-overlay.minimized .cps-resize-handle {
+  display: none;
 }
 
 /* Responsive Design */

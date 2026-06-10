@@ -24,6 +24,10 @@ const CLAUDE_MODELS = {
   'claude-opus-4-7': { name: 'Claude Opus 4.7', vision: true }
 };
 
+// In-flight streaming requests, keyed by requestId, so a Stop button in the
+// overlay can abort the right fetch without touching any other request.
+const activeStreams = new Map();
+
 // Initialize context menu
 function initializeContextMenu() {
   chrome.contextMenus.removeAll(() => {
@@ -65,6 +69,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'analyzeStream') {
     handleAnalysisStream(request.data, sender.tab.id);
     return false; // No sendResponse used; let channel close
+  }
+  if (request.action === 'abortStream') {
+    const controller = activeStreams.get(request.requestId);
+    if (controller) controller.abort();
+    return false;
   }
   if (request.action === 'trackUsage') {
     trackUsage(request.data);
@@ -120,9 +129,12 @@ function analyzeContentType(text) {
 function buildPrompt(text, contentType, isImage = false) {
   const { isMath, isCode, isQuestion, isFillBlank, isCommand, isStatement, isLongText, wordCount } = contentType;
   
-  let systemPrompt = 'You are a helpful AI assistant that provides accurate, concise answers. ';
+  let systemPrompt = 'You are a helpful AI assistant that provides accurate, concise answers. ' +
+    'Format replies in Markdown: use headings, bullet/numbered lists, tables, and fenced code blocks ' +
+    'with a language tag (e.g. ```python). Write math in LaTeX — inline as \\( ... \\) and display ' +
+    'equations as $$ ... $$. ';
   let userPrompt = '';
-  
+
   if (isImage) {
     systemPrompt += 'Analyze the image and provide a detailed description. ';
     if (contentType.isMath || contentType.isCode) {
@@ -153,7 +165,7 @@ function buildPrompt(text, contentType, isImage = false) {
     systemPrompt += 'Provide helpful analysis and insights. ';
     userPrompt = text;
   }
-  
+
   return { systemPrompt, userPrompt };
 }
 
@@ -247,7 +259,7 @@ async function callOpenAI(text, contentType, imageData = null, conversationConte
 }
 
 // Call OpenAI API with streaming
-async function callOpenAIStream(text, contentType, imageData = null, conversationContext = [], tabId) {
+async function callOpenAIStream(text, contentType, imageData = null, conversationContext = [], tabId, requestId) {
   const settings = await getSettings();
   const apiKey = settings.openaiKey;
   const model = settings.model || 'gpt-4.1-mini';
@@ -303,73 +315,80 @@ async function callOpenAIStream(text, contentType, imageData = null, conversatio
   
   messages.push(currentUserMessage);
   
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: messages,
-      temperature: temperature,
-      max_tokens: 2000,
-      stream: true
-    })
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: 'OpenAI API error' } }));
-    throw new Error(error.error?.message || 'OpenAI API error');
-  }
-  
-  // Stream the response
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  // Register an AbortController so a Stop request can cancel this fetch.
+  const controller = new AbortController();
+  if (requestId) activeStreams.set(requestId, controller);
+
   let fullResponse = '';
-  
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            // Send final message
-            chrome.tabs.sendMessage(tabId, {
-              action: 'streamComplete',
-              fullResponse: fullResponse
-            });
-            return fullResponse;
-          }
-          
-          try {
-            const json = JSON.parse(data);
-            const delta = json.choices[0]?.delta?.content || '';
-            if (delta) {
-              fullResponse += delta;
-              chrome.tabs.sendMessage(tabId, {
-                action: 'streamChunk',
-                chunk: delta
-              });
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: 2000,
+        stream: true
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'OpenAI API error' } }));
+      throw new Error(error.error?.message || 'OpenAI API error');
+    }
+
+    // Stream the response
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      let stop = false;
+      while (!stop) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') { stop = true; break; }
+
+            try {
+              const json = JSON.parse(data);
+              const delta = json.choices[0]?.delta?.content || '';
+              if (delta) {
+                fullResponse += delta;
+                chrome.tabs.sendMessage(tabId, {
+                  action: 'streamChunk',
+                  chunk: delta,
+                  requestId
+                });
+              }
+            } catch (e) {
+              // Skip invalid JSON
             }
-          } catch (e) {
-            // Skip invalid JSON
           }
         }
       }
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
     }
+  } catch (e) {
+    // User-initiated Stop: keep whatever streamed so far (graceful finish).
+    if (e.name !== 'AbortError') throw e;
   } finally {
-    reader.releaseLock();
+    if (requestId) activeStreams.delete(requestId);
   }
-  
+
   return fullResponse;
 }
 
@@ -472,7 +491,7 @@ async function callClaude(text, contentType, imageData = null, conversationConte
 }
 
 // Call Claude API with streaming
-async function callClaudeStream(text, contentType, imageData = null, conversationContext = [], tabId) {
+async function callClaudeStream(text, contentType, imageData = null, conversationContext = [], tabId, requestId) {
   const settings = await getSettings();
   const apiKey = settings.claudeKey;
   const model = settings.model || 'claude-sonnet-4-6';
@@ -543,81 +562,86 @@ async function callClaudeStream(text, contentType, imageData = null, conversatio
     });
   }
   
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: model,
-      system: systemPrompt,
-      messages: messages,
-      temperature: temperature,
-      max_tokens: 2000,
-      stream: true
-    })
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: 'Claude API error' } }));
-    throw new Error(error.error?.message || 'Claude API error');
-  }
-  
-  // Stream the response
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  // Register an AbortController so a Stop request can cancel this fetch.
+  const controller = new AbortController();
+  if (requestId) activeStreams.set(requestId, controller);
+
   let fullResponse = '';
-  
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            chrome.tabs.sendMessage(tabId, {
-              action: 'streamComplete',
-              fullResponse: fullResponse
-            });
-            return fullResponse;
-          }
-          
-          try {
-            const json = JSON.parse(data);
-            if (json.type === 'content_block_delta' && json.delta?.text) {
-              const delta = json.delta.text;
-              fullResponse += delta;
-              chrome.tabs.sendMessage(tabId, {
-                action: 'streamChunk',
-                chunk: delta
-              });
-            } else if (json.type === 'message_stop') {
-              chrome.tabs.sendMessage(tabId, {
-                action: 'streamComplete',
-                fullResponse: fullResponse
-              });
-              return fullResponse;
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: model,
+        system: systemPrompt,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: 2000,
+        stream: true
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'Claude API error' } }));
+      throw new Error(error.error?.message || 'Claude API error');
+    }
+
+    // Stream the response
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      let stop = false;
+      while (!stop) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') { stop = true; break; }
+
+            try {
+              const json = JSON.parse(data);
+              if (json.type === 'content_block_delta' && json.delta?.text) {
+                const delta = json.delta.text;
+                fullResponse += delta;
+                chrome.tabs.sendMessage(tabId, {
+                  action: 'streamChunk',
+                  chunk: delta,
+                  requestId
+                });
+              } else if (json.type === 'message_stop') {
+                stop = true;
+                break;
+              }
+            } catch (e) {
+              // Skip invalid JSON
             }
-          } catch (e) {
-            // Skip invalid JSON
           }
         }
       }
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
     }
+  } catch (e) {
+    // User-initiated Stop: keep whatever streamed so far (graceful finish).
+    if (e.name !== 'AbortError') throw e;
   } finally {
-    reader.releaseLock();
+    if (requestId) activeStreams.delete(requestId);
   }
-  
+
   return fullResponse;
 }
 
@@ -682,24 +706,24 @@ async function handleAnalysisStream(data, tabId) {
   try {
     const startTime = Date.now();
     const settings = await getSettings();
-    const { text, imageData, conversationContext, isFollowUp } = data;
-    
+    const { text, imageData, conversationContext, isFollowUp, requestId } = data;
+
     // Analyze content type
-    const contentType = isFollowUp 
+    const contentType = isFollowUp
       ? { isMath: false, isCode: false, isQuestion: true, isFillBlank: false, isCommand: false, isStatement: false, isLongText: false, wordCount: (text || '').split(/\s+/).length }
       : analyzeContentType(text || '');
-    
+
     // Call appropriate API with streaming
     let fullResponse;
     if (settings.provider === 'openai') {
-      fullResponse = await callOpenAIStream(text, contentType, imageData, conversationContext, tabId);
+      fullResponse = await callOpenAIStream(text, contentType, imageData, conversationContext, tabId, requestId);
     } else {
-      fullResponse = await callClaudeStream(text, contentType, imageData, conversationContext, tabId);
+      fullResponse = await callClaudeStream(text, contentType, imageData, conversationContext, tabId, requestId);
     }
-    
+
     const responseTime = Date.now() - startTime;
     const confidence = calculateConfidence(fullResponse, contentType);
-    
+
     // Track usage
     trackUsage({
       provider: settings.provider,
@@ -708,13 +732,15 @@ async function handleAnalysisStream(data, tabId) {
       success: true,
       contentType: contentType.isMath ? 'math' : contentType.isCode ? 'code' : 'text'
     });
-    
-    // Send final response with confidence
+
+    // Single completion signal — carries the real confidence (fixes the prior
+    // bug where an earlier streamComplete pinned confidence at the 70% default).
     chrome.tabs.sendMessage(tabId, {
       action: 'streamFinal',
       confidence: confidence,
       responseTime: responseTime,
-      fullResponse: fullResponse
+      fullResponse: fullResponse,
+      requestId: requestId
     });
   } catch (error) {
     const settings = await getSettings();
@@ -724,10 +750,11 @@ async function handleAnalysisStream(data, tabId) {
       success: false,
       error: error.message
     });
-    
+
     chrome.tabs.sendMessage(tabId, {
       action: 'streamError',
-      error: error.message
+      error: error.message,
+      requestId: data && data.requestId
     });
   }
 }

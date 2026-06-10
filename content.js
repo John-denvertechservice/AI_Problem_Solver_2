@@ -7,6 +7,22 @@ let conversationHistory = [];
 let currentConversation = null;
 let currentThread = null; // Current conversation thread with context
 let overlayMode = 'analysis'; // 'bubble' or 'analysis'
+let activeRequestId = null;      // id of the in-flight streaming request, if any
+let activeStreamListener = null; // its chrome.runtime.onMessage listener
+let lastResponseText = '';       // raw markdown of the latest answer (for Copy)
+
+// Unique id per streaming request so chunks/finals from one request can never
+// be applied to another (overlapping requests previously interleaved).
+function makeRequestId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+// Minimum overlay size (px) when dragging/resizing.
+const CPS_MIN_W = 320;
+const CPS_MIN_H = 300;
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
 
 // Initialize on page load
 (function() {
@@ -19,6 +35,7 @@ let overlayMode = 'analysis'; // 'bubble' or 'analysis'
 })();
 
 function init() {
+  console.log("[CPS] content script loaded:", location.href);
   // Listen for Chrome command from background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'analyze-selection') {
@@ -83,7 +100,7 @@ function handleSelectionChange() {
 }
 
 // Get selected text or image
-function getSelection() {
+function getCurrentSelection() {
   const selection = window.getSelection();
   const selectedText = selection.toString().trim();
   
@@ -107,7 +124,7 @@ function getSelection() {
 
 // Handle selection and trigger analysis
 function handleSelection() {
-  const { text, imageData } = getSelection();
+  const { text, imageData } = getCurrentSelection();
   handleSelectionWithData(text, imageData);
 }
 
@@ -191,7 +208,22 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
   
   // Get conversation history for context
   const conversationContext = currentThread ? currentThread.messages.slice(0, -1) : [];
-  
+
+  // Supersede any in-flight request: detach its listener and abort its fetch so
+  // overlapping streams can't interleave their chunks into this one.
+  if (activeStreamListener) {
+    chrome.runtime.onMessage.removeListener(activeStreamListener);
+    activeStreamListener = null;
+  }
+  if (activeRequestId) {
+    chrome.runtime.sendMessage({ action: 'abortStream', requestId: activeRequestId });
+  }
+  const requestId = makeRequestId();
+  activeRequestId = requestId;
+
+  // Streaming is starting — show a Stop control, hide post-answer actions.
+  showStreamingActions();
+
   // Initialize streaming response
   let streamedResponse = '';
   const responseArea = overlayWindow.querySelector('.cps-response-area');
@@ -224,19 +256,23 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
     `;
     threadHTML += '</div>';
     responseArea.innerHTML = threadHTML;
+    // Render code/math in the already-complete prior messages.
+    enhanceElement(responseArea);
   } else {
     // Single response with streaming
     responseArea.innerHTML = '<div class="cps-response" id="streaming-content"></div>';
   }
-  
+
   const streamingContent = responseArea.querySelector('#streaming-content');
   
   // Set up message listener for streaming
   const messageListener = (request, sender, sendResponse) => {
+    // Ignore anything belonging to a different (e.g. superseded) request.
+    if (request.requestId && request.requestId !== requestId) return;
     if (request.action === 'streamChunk') {
       streamedResponse += request.chunk;
       if (streamingContent) {
-        streamingContent.innerHTML = formatResponse(streamedResponse);
+        streamingContent.innerHTML = formatStreaming(streamedResponse);
         // Auto-scroll to bottom
         responseArea.scrollTop = responseArea.scrollHeight;
       }
@@ -250,67 +286,90 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
       const finalResponse = request.fullResponse || streamedResponse;
       const confidence = request.confidence || 70;
       const responseTime = request.responseTime || 0;
-      
-      // Update final response
+      lastResponseText = finalResponse; // raw text for Copy
+
+      // Update final response — full markdown/code/math render now that the
+      // complete text is available, then enhance (highlight + KaTeX). An empty
+      // result means the user stopped before any text arrived.
       if (streamingContent) {
-        streamingContent.innerHTML = formatResponse(finalResponse);
+        if (finalResponse) {
+          streamingContent.innerHTML = formatResponse(finalResponse);
+          enhanceElement(streamingContent);
+        } else {
+          streamingContent.innerHTML = '<span class="cps-stopped">(stopped)</span>';
+        }
       }
-      
-      // Add AI response to thread
-      if (currentThread) {
-        currentThread.messages.push({
-          role: 'assistant',
-          text: finalResponse,
-          confidence: confidence,
-          timestamp: Date.now()
-        });
+
+      // Add AI response to thread / history only if we actually got content.
+      if (finalResponse) {
+        if (currentThread) {
+          currentThread.messages.push({
+            role: 'assistant',
+            text: finalResponse,
+            confidence: confidence,
+            timestamp: Date.now()
+          });
+        }
+
+        // Show and update confidence indicator
+        const confidenceSection = overlayWindow.querySelector('.cps-confidence');
+        if (confidenceSection) {
+          confidenceSection.style.display = 'block';
+        }
+        updateConfidence(confidence);
+
+        // Save to conversation history
+        if (!isFollowUp) {
+          addToHistory({
+            text,
+            response: finalResponse,
+            confidence: confidence,
+            timestamp: Date.now(),
+            threadId: currentThread?.id
+          });
+        } else {
+          updateHistoryThread(currentThread);
+        }
       }
-      
-      // Show and update confidence indicator
-      const confidenceSection = overlayWindow.querySelector('.cps-confidence');
-      if (confidenceSection) {
-        confidenceSection.style.display = 'block';
-      }
-      updateConfidence(confidence);
-      
-      // Save to conversation history
-      if (!isFollowUp) {
-        addToHistory({
-          text,
-          response: finalResponse,
-          confidence: confidence,
-          timestamp: Date.now(),
-          threadId: currentThread?.id
-        });
-      } else {
-        updateHistoryThread(currentThread);
-      }
-      
+
       // Clear follow-up input
       const followUpInput = overlayWindow.querySelector('.cps-followup-input');
       if (followUpInput) {
         followUpInput.value = '';
         updateWordCount();
       }
-      
-      // Remove message listener
+
+      // Answer is final: offer Copy/Regenerate, drop the Stop control, and
+      // clear the in-flight markers (only if we're still the active request).
+      showCompletedActions(!!finalResponse);
       chrome.runtime.onMessage.removeListener(messageListener);
+      if (activeRequestId === requestId) {
+        activeRequestId = null;
+        activeStreamListener = null;
+      }
     } else if (request.action === 'streamError') {
       displayError(request.error);
+      showErrorActions(); // allow Regenerate, nothing to copy
       chrome.runtime.onMessage.removeListener(messageListener);
+      if (activeRequestId === requestId) {
+        activeRequestId = null;
+        activeStreamListener = null;
+      }
     }
   };
-  
+
+  activeStreamListener = messageListener;
   chrome.runtime.onMessage.addListener(messageListener);
-  
+
   // Send streaming request
   chrome.runtime.sendMessage({
     action: 'analyzeStream',
-    data: { 
-      text, 
+    data: {
+      text,
       imageData,
       conversationContext: conversationContext,
-      isFollowUp: isFollowUp
+      isFollowUp: isFollowUp,
+      requestId: requestId
     }
   });
 }
@@ -391,6 +450,11 @@ function createOverlayWindow(mode = 'analysis') {
       <div class="cps-content">
         <div class="cps-tab-content active" data-content="main">
           <div class="cps-response-area"></div>
+          <div class="cps-actions">
+            <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
+            <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
+            <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
+          </div>
           <div class="cps-confidence">
             <div class="cps-confidence-label">Confidence</div>
             <div class="cps-confidence-bar">
@@ -400,8 +464,8 @@ function createOverlayWindow(mode = 'analysis') {
           </div>
           <div class="cps-followup">
             <div class="cps-followup-input-wrapper">
-              <textarea 
-                class="cps-followup-input" 
+              <textarea
+                class="cps-followup-input"
                 placeholder="Ask a follow up or clarification!"
                 maxlength="500"
                 rows="2"
@@ -419,13 +483,15 @@ function createOverlayWindow(mode = 'analysis') {
           <div class="cps-history-list"></div>
         </div>
       </div>
+      <div class="cps-resize-handle" title="Drag to resize"></div>
     `;
-    
+
     document.body.appendChild(overlayWindow);
     setupWindowControls();
     setupTabs();
     setupFeedback();
     setupFollowUp();
+    setupActions();
   }
 }
 
@@ -452,6 +518,85 @@ function setupWindowControls() {
     closeBtn.addEventListener('click', () => {
       overlayWindow.classList.add('hidden');
       saveWindowState();
+    });
+  }
+
+  // Header-drag and corner-resize (re-bound here since the markup is rebuilt
+  // on every mode morph).
+  enableDragAndResize();
+}
+
+// Enable dragging the overlay by its header and resizing via the corner handle.
+// Both switch the overlay from its default bottom/right anchoring to explicit
+// left/top, clamp to the viewport, and persist on release.
+function enableDragAndResize() {
+  if (!overlayWindow) return;
+  const header = overlayWindow.querySelector('.cps-header');
+  const handle = overlayWindow.querySelector('.cps-resize-handle');
+
+  // Pin current on-screen rect as left/top and drop bottom/right anchoring.
+  const anchorTopLeft = () => {
+    const rect = overlayWindow.getBoundingClientRect();
+    overlayWindow.style.left = rect.left + 'px';
+    overlayWindow.style.top = rect.top + 'px';
+    overlayWindow.style.right = 'auto';
+    overlayWindow.style.bottom = 'auto';
+    return rect;
+  };
+
+  // --- Drag via header ---
+  if (header) {
+    header.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.cps-controls')) return; // let window buttons work
+      e.preventDefault();
+      const rect = anchorTopLeft();
+      const offsetX = e.clientX - rect.left;
+      const offsetY = e.clientY - rect.top;
+      overlayWindow.classList.add('cps-dragging');
+
+      const onMove = (ev) => {
+        const w = overlayWindow.offsetWidth;
+        const h = overlayWindow.offsetHeight;
+        overlayWindow.style.left = clamp(ev.clientX - offsetX, 0, Math.max(0, window.innerWidth - w)) + 'px';
+        overlayWindow.style.top = clamp(ev.clientY - offsetY, 0, Math.max(0, window.innerHeight - h)) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        overlayWindow.classList.remove('cps-dragging');
+        saveWindowState();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // --- Resize via bottom-right handle (analysis mode only) ---
+  if (handle) {
+    handle.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = anchorTopLeft();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      overlayWindow.classList.add('cps-resizing');
+
+      const onMove = (ev) => {
+        const w = clamp(rect.width + (ev.clientX - startX), CPS_MIN_W, window.innerWidth - rect.left);
+        const h = clamp(rect.height + (ev.clientY - startY), CPS_MIN_H, window.innerHeight - rect.top);
+        overlayWindow.style.width = w + 'px';
+        overlayWindow.style.height = h + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        overlayWindow.classList.remove('cps-resizing');
+        saveWindowState();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     });
   }
 }
@@ -484,13 +629,13 @@ function setupTabs() {
 function setupFeedback() {
   const likeBtn = overlayWindow.querySelector('.cps-like');
   const dislikeBtn = overlayWindow.querySelector('.cps-dislike');
-  
+
   likeBtn.addEventListener('click', () => {
     saveFeedback('like');
     likeBtn.classList.add('active');
     setTimeout(() => likeBtn.classList.remove('active'), 1000);
   });
-  
+
   dislikeBtn.addEventListener('click', () => {
     showFeedbackModal();
   });
@@ -520,6 +665,87 @@ function setupFollowUp() {
   sendBtn.addEventListener('click', () => {
     sendFollowUp();
   });
+}
+
+// Setup response action buttons (Stop / Copy / Regenerate)
+function setupActions() {
+  const stopBtn = overlayWindow.querySelector('.cps-stop');
+  const copyBtn = overlayWindow.querySelector('.cps-copy');
+  const regenBtn = overlayWindow.querySelector('.cps-regenerate');
+
+  if (stopBtn) {
+    stopBtn.addEventListener('click', () => {
+      if (activeRequestId) {
+        // Background aborts the fetch and returns whatever streamed so far.
+        chrome.runtime.sendMessage({ action: 'abortStream', requestId: activeRequestId });
+      }
+    });
+  }
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => copyLastResponse(copyBtn));
+  }
+  if (regenBtn) {
+    regenBtn.addEventListener('click', () => regenerate());
+  }
+}
+
+// Toggle which response actions are visible.
+function setActionVisibility({ stop = false, copy = false, regen = false }) {
+  if (!overlayWindow) return;
+  const stopBtn = overlayWindow.querySelector('.cps-stop');
+  const copyBtn = overlayWindow.querySelector('.cps-copy');
+  const regenBtn = overlayWindow.querySelector('.cps-regenerate');
+  if (stopBtn) stopBtn.style.display = stop ? 'inline-flex' : 'none';
+  if (copyBtn) copyBtn.style.display = copy ? 'inline-flex' : 'none';
+  if (regenBtn) regenBtn.style.display = regen ? 'inline-flex' : 'none';
+}
+function showStreamingActions() { setActionVisibility({ stop: true }); }
+function showCompletedActions(hasText = true) { setActionVisibility({ copy: hasText, regen: true }); }
+function showErrorActions() { setActionVisibility({ regen: true }); }
+
+// Copy the latest raw answer to the clipboard.
+function copyLastResponse(btn) {
+  if (!lastResponseText) return;
+  const flash = () => {
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = prev; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(lastResponseText).then(flash).catch(() => fallbackCopy(lastResponseText, flash));
+  } else {
+    fallbackCopy(lastResponseText, flash);
+  }
+}
+function fallbackCopy(text, cb) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (cb) cb();
+  } catch (_) {}
+}
+
+// Re-run the most recent user turn, replacing the last answer.
+function regenerate() {
+  if (!currentThread || !currentThread.messages.length) return;
+  const msgs = currentThread.messages;
+  // Drop the trailing assistant answer we want to redo.
+  if (msgs[msgs.length - 1].role === 'assistant') msgs.pop();
+  // The last remaining turn should be the user prompt to re-run.
+  const lastUser = msgs.length ? msgs[msgs.length - 1] : null;
+  if (!lastUser || lastUser.role !== 'user') return;
+  // Pop it so sendAnalysisRequest re-adds it against the trimmed context.
+  msgs.pop();
+  const isFollowUp = msgs.length > 0;
+  displayLoading();
+  sendAnalysisRequest(lastUser.text, lastUser.imageData || null, isFollowUp);
 }
 
 // Update word count
@@ -594,13 +820,13 @@ function showFeedbackModal() {
       </div>
     </div>
   `;
-  
+
   document.body.appendChild(modal);
-  
+
   const closeModal = () => {
     modal.remove();
   };
-  
+
   modal.querySelector('.cps-modal-close').addEventListener('click', closeModal);
   modal.querySelector('.cps-modal-cancel').addEventListener('click', closeModal);
   modal.querySelector('.cps-modal-submit').addEventListener('click', () => {
@@ -610,7 +836,7 @@ function showFeedbackModal() {
     }
     closeModal();
   });
-  
+
   // Close on backdrop click
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
@@ -627,7 +853,7 @@ function saveFeedback(type, comment = '') {
     timestamp: Date.now(),
     conversationId: currentConversation?.timestamp || Date.now()
   };
-  
+
   chrome.storage.local.get(['feedback'], (result) => {
     const feedbackList = result.feedback || [];
     feedbackList.push(feedback);
@@ -644,9 +870,12 @@ function displayLoading() {
   
   const responseArea = overlayWindow?.querySelector('.cps-response-area');
   const confidenceSection = overlayWindow?.querySelector('.cps-confidence');
-  
+
   if (!responseArea) return;
-  
+
+  // Clear any stale Copy/Regenerate from a previous answer while loading.
+  setActionVisibility({});
+
   responseArea.innerHTML = `
     <div class="cps-loading">
       <div class="cps-typing-indicator">
@@ -657,12 +886,12 @@ function displayLoading() {
       <p>Analyzing...</p>
     </div>
   `;
-  
+
   // Hide confidence indicator during loading
   if (confidenceSection) {
     confidenceSection.style.display = 'none';
   }
-  
+
   // Switch to main tab
   const mainTab = overlayWindow.querySelector('[data-tab="main"]');
   if (mainTab) {
@@ -701,14 +930,17 @@ function displayResponse(response, confidence, responseTime, isFollowUp = false)
     // Display single response
     responseArea.innerHTML = `<div class="cps-response">${formatResponse(response)}</div>`;
   }
-  
+
+  // Highlight code and render math in whatever was just inserted.
+  enhanceElement(responseArea);
+
   // Show and update confidence indicator
   const confidenceSection = overlayWindow.querySelector('.cps-confidence');
   if (confidenceSection) {
     confidenceSection.style.display = 'block';
   }
   updateConfidence(confidence);
-  
+
   // Store current conversation
   currentConversation = {
     response,
@@ -716,70 +948,112 @@ function displayResponse(response, confidence, responseTime, isFollowUp = false)
     responseTime,
     timestamp: Date.now()
   };
-  
+
   // Scroll to bottom
   responseArea.scrollTop = responseArea.scrollHeight;
 }
 
-// Format response text
+// Escape HTML so untrusted text (selected page content, AI output, errors)
+// can never inject markup when inserted via innerHTML. Must run BEFORE we add
+// our own intentional tags (<strong>, <code>, ...) in formatResponse.
+function escapeHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Math delimiters shared by the markdown-protect step and KaTeX auto-render,
+// so both agree on what counts as math.
+const MATH_DELIMITERS = [
+  { left: '$$', right: '$$', display: true },
+  { left: '\\[', right: '\\]', display: true },
+  { left: '\\(', right: '\\)', display: false },
+  { left: '$', right: '$', display: false }
+];
+
+// Render a markdown/LaTeX response to safe HTML.
+// Pipeline: stash math -> marked (GFM) -> DOMPurify (input is untrusted!) -> restore math.
+// Code highlighting and KaTeX run afterward via enhanceElement() on the live DOM.
 function formatResponse(text) {
-  // Clean up LaTeX markup characters
-  let cleaned = text
-    // Remove inline math delimiters \( and \)
-    .replace(/\\\(/g, '')
-    .replace(/\\\)/g, '')
-    // Remove display math delimiters \[ and \]
-    .replace(/\\\[/g, '')
-    .replace(/\\\]/g, '')
-    // Remove dollar sign math delimiters (display math: $$...$$)
-    .replace(/\$\$([^$]+)\$\$/g, '$1')
-    // Remove common LaTeX text formatting commands (convert to HTML)
-    .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
-    .replace(/\\texttt\{([^}]+)\}/g, '<code>$1</code>')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    // Remove other common LaTeX commands (extract content from braces)
-    .replace(/\\[a-zA-Z]+\{([^}]+)\}/g, '$1')
-    // Clean up escaped special characters
-    .replace(/\\&/g, '&')
-    .replace(/\\%/g, '%')
-    .replace(/\\#/g, '#')
-    .replace(/\\\$/g, '$')
-    .replace(/\\_/g, '_')
-    .replace(/\\\{/g, '{')
-    .replace(/\\\}/g, '}')
-    // Remove standalone backslashes that might be LaTeX remnants
-    .replace(/\\([^a-zA-Z{}_^$&#%])/g, '$1');
-  
-  // Basic formatting - preserve line breaks and basic markdown
-  return cleaned
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>');
+  const src = String(text ?? '');
+
+  // 1) Protect math so markdown doesn't treat _ * \ inside formulas as syntax.
+  const mathSpans = [];
+  const stash = (m) => `@@KMATH${mathSpans.push(m) - 1}@@`;
+  const protectedSrc = src
+    .replace(/\$\$[\s\S]+?\$\$/g, stash)
+    .replace(/\\\[[\s\S]+?\\\]/g, stash)
+    .replace(/\\\([\s\S]+?\\\)/g, stash)
+    .replace(/\$[^\n$]+?\$/g, stash);
+
+  // 2) Markdown -> HTML (fall back to escaped text if marked failed to load).
+  let html;
+  try {
+    html = marked.parse(protectedSrc, { gfm: true, breaks: true });
+  } catch (_) {
+    html = escapeHtml(protectedSrc).replace(/\n/g, '<br>');
+  }
+
+  // 3) Sanitize — marked passes raw HTML through and the input is untrusted.
+  if (typeof DOMPurify !== 'undefined') {
+    html = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+  }
+
+  // 4) Restore math as escaped text for KaTeX auto-render to pick up later.
+  html = html.replace(/@@KMATH(\d+)@@/g, (_, i) => escapeHtml(mathSpans[Number(i)] || ''));
+  return html;
+}
+
+// Lightweight formatter for streaming chunks: cheap and safe, no markdown/math
+// passes (those would re-run on every token). The full render happens once the
+// stream completes, in the streamComplete/streamFinal handler.
+function formatStreaming(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+// After response HTML is in the DOM, syntax-highlight code blocks and render math.
+function enhanceElement(el) {
+  if (!el) return;
+  if (typeof hljs !== 'undefined') {
+    el.querySelectorAll('pre code').forEach((block) => {
+      try { hljs.highlightElement(block); } catch (_) {}
+    });
+  }
+  if (typeof renderMathInElement !== 'undefined') {
+    try {
+      renderMathInElement(el, {
+        delimiters: MATH_DELIMITERS,
+        throwOnError: false,
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      });
+    } catch (_) {}
+  }
 }
 
 // Display error
 function displayError(error) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
-  responseArea.innerHTML = `<div class="cps-error">Error: ${error}</div>`;
+  responseArea.innerHTML = `<div class="cps-error">Error: ${escapeHtml(error)}</div>`;
   updateConfidence(0);
 }
 
 // Display message
 function displayMessage(message) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
-  responseArea.innerHTML = `<div class="cps-message">${message}</div>`;
+  responseArea.innerHTML = `<div class="cps-message">${escapeHtml(message)}</div>`;
 }
 
 // Update confidence indicator
 function updateConfidence(confidence) {
   const fill = overlayWindow.querySelector('.cps-confidence-fill');
   const percentage = overlayWindow.querySelector('.cps-confidence-percentage');
-  
+
   fill.style.width = `${confidence}%`;
   percentage.textContent = `${Math.round(confidence)}%`;
-  
+
   // Update color based on confidence
   if (confidence >= 80) {
     fill.style.backgroundColor = '#4caf50';
@@ -839,7 +1113,7 @@ function loadHistory() {
             <span class="cps-history-time">${date.toLocaleString()}</span>
             <span class="cps-history-confidence">${Math.round(item.confidence)}%</span>
           </div>
-          <div class="cps-history-text">${item.text.substring(0, 100)}${item.text.length > 100 ? '...' : ''}</div>
+          <div class="cps-history-text">${escapeHtml(item.text.substring(0, 100))}${item.text.length > 100 ? '...' : ''}</div>
         </div>
       `;
     }).join('');
@@ -882,6 +1156,7 @@ function displayHistoryItem(item) {
     
     threadHTML += '</div>';
     responseArea.innerHTML = threadHTML;
+    enhanceElement(responseArea);
     updateConfidence(item.confidence);
   } else {
     displayResponse(item.response, item.confidence, item.responseTime);
@@ -973,6 +1248,11 @@ function morphToAnalysisMode() {
     <div class="cps-content">
       <div class="cps-tab-content active" data-content="main">
         <div class="cps-response-area"></div>
+        <div class="cps-actions">
+          <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
+          <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
+          <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
+        </div>
         <div class="cps-confidence">
           <div class="cps-confidence-label">Confidence</div>
           <div class="cps-confidence-bar">
@@ -982,8 +1262,8 @@ function morphToAnalysisMode() {
         </div>
         <div class="cps-followup">
           <div class="cps-followup-input-wrapper">
-            <textarea 
-              class="cps-followup-input" 
+            <textarea
+              class="cps-followup-input"
               placeholder="Ask a follow up or clarification!"
               maxlength="500"
               rows="2"
@@ -1001,12 +1281,14 @@ function morphToAnalysisMode() {
         <div class="cps-history-list"></div>
       </div>
     </div>
+    <div class="cps-resize-handle" title="Drag to resize"></div>
   `;
-  
+
   setupWindowControls();
   setupTabs();
   setupFeedback();
   setupFollowUp();
+  setupActions();
 }
 
 // Setup Welcome Bubble drag & drop
@@ -1150,15 +1432,52 @@ function handleImageFile(file) {
   reader.readAsDataURL(file);
 }
 
-// Save window state
+// Save window state — minimized flag plus any explicit position/size the user
+// set by dragging or resizing. Size is only meaningful in analysis mode (bubble
+// mode is auto-height), so width/height are recorded only there.
 function saveWindowState() {
   if (!overlayWindow) return;
-  
-  const state = {
-    minimized: isMinimized
-  };
-  
+
+  const s = overlayWindow.style;
+  const state = { minimized: isMinimized };
+
+  if (s.left) state.left = parseInt(s.left, 10);
+  if (s.top) state.top = parseInt(s.top, 10);
+  if (overlayMode === 'analysis') {
+    if (s.width) state.width = parseInt(s.width, 10);
+    if (s.height) state.height = parseInt(s.height, 10);
+  }
+
   chrome.storage.local.set({ windowState: state });
+}
+
+// Apply a saved geometry to the current overlay, clamped to the viewport so a
+// position saved on another screen size (e.g. a different machine) stays visible.
+function applyGeometry(state) {
+  if (!overlayWindow || !state) return;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  let width = overlayWindow.offsetWidth;
+  let height = overlayWindow.offsetHeight;
+
+  if (overlayMode === 'analysis') {
+    if (typeof state.width === 'number') {
+      width = clamp(state.width, CPS_MIN_W, vw);
+      overlayWindow.style.width = width + 'px';
+    }
+    if (typeof state.height === 'number') {
+      height = clamp(state.height, CPS_MIN_H, vh);
+      overlayWindow.style.height = height + 'px';
+    }
+  }
+
+  if (typeof state.left === 'number' && typeof state.top === 'number') {
+    overlayWindow.style.left = clamp(state.left, 0, Math.max(0, vw - width)) + 'px';
+    overlayWindow.style.top = clamp(state.top, 0, Math.max(0, vh - height)) + 'px';
+    overlayWindow.style.right = 'auto';
+    overlayWindow.style.bottom = 'auto';
+  }
 }
 
 // Restore window state
@@ -1167,10 +1486,14 @@ function restoreWindowState() {
     if (result.windowState && overlayWindow) {
       const state = result.windowState;
       isMinimized = state.minimized || false;
-      
+
       if (isMinimized) {
         overlayWindow.classList.add('minimized');
+      } else {
+        overlayWindow.classList.remove('minimized');
       }
+
+      applyGeometry(state);
     }
   });
 }

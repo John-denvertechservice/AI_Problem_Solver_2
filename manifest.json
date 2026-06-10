@@ -20,8 +20,19 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "vendor/marked.min.js",
+        "vendor/purify.min.js",
+        "vendor/highlight.min.js",
+        "vendor/katex.min.js",
+        "vendor/katex.auto-render.min.js",
+        "content.js"
+      ],
+      "css": [
+        "vendor/katex.min.css",
+        "vendor/highlight-theme.css",
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -33,6 +44,12 @@
       "128": "icons/icon128.png"
     }
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["fonts/*.woff2", "vendor/fonts/*.woff2"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "options_page": "options.html",
   "commands": {
     "analyze-selection": {
