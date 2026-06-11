@@ -35,6 +35,9 @@
   src: url('fonts/inter-latin-700-normal.woff2') format('woff2');
 }
 
+/* Dark theme (default). Defined on :root so the body-level feedback modal — which
+   lives outside the overlay — inherits the same palette. Per-theme overrides
+   below are scoped to the overlay subtree (and the modal) via [data-theme]. */
 :root {
   --cps-bg-primary: #1a1a2e;
   --cps-bg-secondary: #2a2a3e;
@@ -45,11 +48,41 @@
   --cps-text-primary: #ffffff;
   --cps-text-secondary: #b0b0b0;
   --cps-border: rgba(255, 255, 255, 0.1);
+  /* Semantic surfaces so both themes recolor from one place. */
+  --cps-surface: rgba(0, 0, 0, 0.2);          /* panels: tabs, history, assistant bubble */
+  --cps-surface-2: rgba(0, 0, 0, 0.3);        /* inputs, inline code */
+  --cps-btn-bg: rgba(255, 255, 255, 0.1);     /* icon/action/feedback buttons */
+  --cps-btn-bg-hover: rgba(255, 255, 255, 0.2);
+  --cps-code-bg: rgba(0, 0, 0, 0.35);         /* code blocks (kept dark in both themes) */
+  --cps-code-text: #e8e8ef;
+  --cps-accent-tint: rgba(66, 133, 244, 0.1);
+  --cps-accent-tint-strong: rgba(66, 133, 244, 0.2);
   --cps-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   --cps-shadow-hover: 0 12px 48px rgba(66, 133, 244, 0.3);
   --cps-success: #4caf50;
   --cps-warning: #ff9800;
   --cps-error: #f44336;
+}
+
+/* Light theme — applied when the overlay (or modal) carries data-theme="light".
+   Code blocks intentionally stay dark so the bundled syntax theme remains legible. */
+#chrome-problem-solver-overlay[data-theme="light"],
+.cps-modal[data-theme="light"] {
+  --cps-bg-primary: #ffffff;
+  --cps-bg-secondary: #eef1f6;
+  --cps-bg-tertiary: #e2e6ee;
+  --cps-text-primary: #1c2430;
+  --cps-text-secondary: #5a6472;
+  --cps-border: rgba(0, 0, 0, 0.12);
+  --cps-surface: rgba(0, 0, 0, 0.04);
+  --cps-surface-2: rgba(0, 0, 0, 0.06);
+  --cps-btn-bg: rgba(0, 0, 0, 0.06);
+  --cps-btn-bg-hover: rgba(0, 0, 0, 0.12);
+  --cps-code-bg: #1b1b27;
+  --cps-code-text: #e8e8ef;
+  --cps-accent-tint: rgba(66, 133, 244, 0.12);
+  --cps-accent-tint-strong: rgba(66, 133, 244, 0.22);
+  --cps-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 
 #chrome-problem-solver-overlay {
@@ -70,7 +103,7 @@
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--cps-border);
 }
 
 #chrome-problem-solver-overlay::before {
@@ -120,15 +153,32 @@
   background: linear-gradient(90deg, transparent, rgba(66, 133, 244, 0.3), transparent);
 }
 
+.cps-titlewrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .cps-title {
   font-size: 16px;
   font-weight: 600;
   color: var(--cps-text-primary);
   letter-spacing: 0.3px;
-  background: linear-gradient(135deg, #ffffff 0%, var(--cps-chrome-blue-light) 100%);
+  /* Gradient adapts to the theme: starts from the primary text color so it stays
+     legible on a light background (a hardcoded white start would vanish). */
+  background: linear-gradient(135deg, var(--cps-text-primary) 0%, var(--cps-chrome-blue) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  white-space: nowrap;
+}
+
+.cps-version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cps-text-secondary);
+  letter-spacing: 0.2px;
 }
 
 .cps-controls {
@@ -140,7 +190,7 @@
   width: 28px;
   height: 28px;
   border: none;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--cps-btn-bg);
   color: var(--cps-text-primary);
   border-radius: 6px;
   cursor: pointer;
@@ -155,7 +205,7 @@
 }
 
 .cps-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--cps-btn-bg-hover);
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
@@ -174,7 +224,7 @@
   display: flex;
   gap: 4px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--cps-surface);
   border-bottom: 1px solid var(--cps-border);
   flex-shrink: 0;
 }
@@ -194,7 +244,7 @@
 }
 
 .cps-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--cps-btn-bg);
   color: var(--cps-text-primary);
 }
 
@@ -240,17 +290,17 @@
 }
 
 .cps-tab-content::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--cps-surface);
   border-radius: 4px;
 }
 
 .cps-tab-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--cps-btn-bg-hover);
   border-radius: 4px;
 }
 
 .cps-tab-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--cps-btn-bg-hover);
 }
 
 /* Response Area */
@@ -271,7 +321,7 @@
 }
 
 .cps-response code {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cps-surface-2);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Monaco', 'Courier New', monospace;
@@ -284,6 +334,25 @@
 .cps-response, .cps-message-content {
   word-wrap: break-word;
   overflow-wrap: anywhere;
+}
+
+/* Force readable body-text color with #id specificity. The overlay is injected
+   into the host page's DOM, so a page rule like `p { color:#111 }` would
+   otherwise win over inherited color and make the answer text unreadable.
+   Code/links/strong keep their own colors (more specific rules below). */
+#chrome-problem-solver-overlay .cps-response,
+#chrome-problem-solver-overlay .cps-message-content,
+#chrome-problem-solver-overlay .cps-response p,
+#chrome-problem-solver-overlay .cps-message-content p,
+#chrome-problem-solver-overlay .cps-response li,
+#chrome-problem-solver-overlay .cps-message-content li,
+#chrome-problem-solver-overlay .cps-response td,
+#chrome-problem-solver-overlay .cps-message-content td,
+#chrome-problem-solver-overlay .cps-response th,
+#chrome-problem-solver-overlay .cps-message-content th,
+#chrome-problem-solver-overlay .cps-response dt,
+#chrome-problem-solver-overlay .cps-response dd {
+  color: var(--cps-text-primary);
 }
 
 .cps-response h1, .cps-response h2, .cps-response h3,
@@ -334,19 +403,19 @@
   padding: 12px 14px;
   border-radius: 8px;
   overflow-x: auto;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--cps-code-bg);
   border: 1px solid var(--cps-border);
 }
 .cps-response pre code, .cps-message-content pre code {
   display: block;
   padding: 0;
   background: transparent;
-  color: inherit;
+  color: var(--cps-code-text);
   font-size: 13px;
   line-height: 1.5;
 }
 .cps-message-content code {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cps-surface-2);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Monaco', 'Courier New', monospace;
@@ -417,7 +486,7 @@
   font-weight: 500;
   font-family: 'Inter', sans-serif;
   color: var(--cps-text-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--cps-btn-bg);
   border: 1px solid var(--cps-border);
   border-radius: 8px;
   cursor: pointer;
@@ -425,7 +494,7 @@
 }
 
 .cps-action-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--cps-btn-bg-hover);
   transform: translateY(-1px);
 }
 
@@ -493,71 +562,6 @@
   margin: 0;
 }
 
-/* Confidence Indicator */
-.cps-confidence {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-  border: 1px solid var(--cps-border);
-}
-
-.cps-confidence-label {
-  font-size: 12px;
-  color: var(--cps-text-secondary);
-  margin-bottom: 8px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.cps-confidence-bar {
-  width: 100%;
-  height: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 8px;
-  position: relative;
-}
-
-.cps-confidence-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.cps-confidence-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--cps-chrome-blue) 0%, var(--cps-chrome-blue-light) 100%);
-  border-radius: 4px;
-  transition: width 0.5s ease, background-color 0.3s ease;
-  box-shadow: 0 0 12px rgba(66, 133, 244, 0.5);
-  position: relative;
-  z-index: 1;
-}
-
-.cps-confidence-percentage {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--cps-text-primary);
-  text-align: right;
-}
-
 /* Follow-up Input */
 .cps-followup {
   margin-bottom: 16px;
@@ -573,7 +577,7 @@
 .cps-followup-input {
   width: 100%;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cps-surface-2);
   border: 1px solid var(--cps-border);
   border-radius: 8px;
   color: var(--cps-text-primary);
@@ -652,14 +656,14 @@
 }
 
 .cps-user-message {
-  background: rgba(66, 133, 244, 0.1);
-  border: 1px solid rgba(66, 133, 244, 0.2);
+  background: var(--cps-accent-tint);
+  border: 1px solid var(--cps-accent-tint-strong);
   align-self: flex-end;
   max-width: 85%;
 }
 
 .cps-assistant-message {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--cps-surface);
   border: 1px solid var(--cps-border);
   align-self: flex-start;
   max-width: 85%;
@@ -667,13 +671,6 @@
 
 .cps-message-content {
   color: var(--cps-text-primary);
-}
-
-.cps-message-confidence {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--cps-text-secondary);
-  font-weight: 500;
 }
 
 .cps-streaming {
@@ -707,7 +704,7 @@
   width: 40px;
   height: 40px;
   border: none;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--cps-btn-bg);
   border-radius: 50%;
   cursor: pointer;
   display: flex;
@@ -720,7 +717,7 @@
 }
 
 .cps-feedback-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--cps-btn-bg-hover);
   transform: scale(1.1);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
@@ -743,7 +740,7 @@
 
 .cps-history-item {
   padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--cps-surface);
   border-radius: 8px;
   border: 1px solid var(--cps-border);
   cursor: pointer;
@@ -751,7 +748,7 @@
 }
 
 .cps-history-item:hover {
-  background: rgba(66, 133, 244, 0.1);
+  background: var(--cps-accent-tint);
   border-color: rgba(66, 133, 244, 0.3);
   transform: translateX(4px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -767,15 +764,6 @@
 .cps-history-time {
   font-size: 12px;
   color: var(--cps-text-secondary);
-}
-
-.cps-history-confidence {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--cps-chrome-blue-light);
-  padding: 2px 8px;
-  background: rgba(66, 133, 244, 0.2);
-  border-radius: 12px;
 }
 
 .cps-history-text {
@@ -858,7 +846,7 @@
   width: 32px;
   height: 32px;
   border: none;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--cps-btn-bg);
   color: var(--cps-text-primary);
   border-radius: 6px;
   cursor: pointer;
@@ -867,7 +855,7 @@
 }
 
 .cps-modal-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--cps-btn-bg-hover);
 }
 
 .cps-modal-body {
@@ -884,7 +872,7 @@
   width: 100%;
   min-height: 120px;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cps-surface-2);
   border: 1px solid var(--cps-border);
   border-radius: 8px;
   color: var(--cps-text-primary);
@@ -910,7 +898,7 @@
 
 .cps-btn-secondary {
   padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--cps-btn-bg);
   border: 1px solid var(--cps-border);
   color: var(--cps-text-primary);
   border-radius: 8px;
@@ -921,7 +909,7 @@
 }
 
 .cps-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--cps-btn-bg-hover);
 }
 
 .cps-btn-primary {
@@ -977,7 +965,7 @@
 .cps-bubble-input {
   flex: 1;
   padding: 14px 16px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cps-surface-2);
   border: 2px solid var(--cps-chrome-blue);
   border-radius: 8px;
   color: var(--cps-text-primary);

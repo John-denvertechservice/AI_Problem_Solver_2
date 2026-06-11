@@ -1,4 +1,4 @@
-// Chrome Problem Solver - Popup Script
+// AI Problem Solver - Popup Script
 
 document.addEventListener('DOMContentLoaded', () => {
   loadQuickStats();

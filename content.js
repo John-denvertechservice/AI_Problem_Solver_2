@@ -1,4 +1,4 @@
-// Chrome Problem Solver - Content Script
+// AI Problem Solver - Content Script
 // Handles text/image selection, hotkey listeners, UI creation, and communication
 
 let overlayWindow = null;
@@ -10,6 +10,7 @@ let overlayMode = 'analysis'; // 'bubble' or 'analysis'
 let activeRequestId = null;      // id of the in-flight streaming request, if any
 let activeStreamListener = null; // its chrome.runtime.onMessage listener
 let lastResponseText = '';       // raw markdown of the latest answer (for Copy)
+let currentTheme = 'dark';       // 'dark' | 'light' — persisted in settings.theme
 
 // Unique id per streaming request so chunks/finals from one request can never
 // be applied to another (overlapping requests previously interleaved).
@@ -22,6 +23,41 @@ const CPS_MIN_W = 320;
 const CPS_MIN_H = 300;
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+// ── Theme (dark / light) ─────────────────────────────────────────────────────
+// The palette lives in CSS variables; switching is just a data-theme attribute on
+// the overlay (and the feedback modal, which lives outside it). Choice persists in
+// chrome.storage.sync so it follows the user and stays in sync with the options page.
+function applyTheme(theme) {
+  currentTheme = theme === 'light' ? 'light' : 'dark';
+  if (overlayWindow) overlayWindow.dataset.theme = currentTheme;
+  document.querySelectorAll('.cps-modal').forEach((m) => { m.dataset.theme = currentTheme; });
+  updateThemeButton();
+}
+
+function updateThemeButton() {
+  if (!overlayWindow) return;
+  const btn = overlayWindow.querySelector('.cps-theme-toggle');
+  if (!btn) return;
+  const goingLight = currentTheme === 'dark';
+  btn.textContent = goingLight ? '☀️' : '🌙';
+  btn.title = goingLight ? 'Switch to light theme' : 'Switch to dark theme';
+}
+
+function setTheme(theme) {
+  applyTheme(theme);
+  chrome.storage.sync.get(['settings'], (r) => {
+    const settings = r.settings || {};
+    settings.theme = currentTheme;
+    chrome.storage.sync.set({ settings });
+  });
+}
+
+function loadTheme() {
+  chrome.storage.sync.get(['settings'], (r) => {
+    applyTheme(r.settings && r.settings.theme === 'light' ? 'light' : 'dark');
+  });
 }
 
 // Initialize on page load
@@ -58,6 +94,15 @@ function init() {
   
   // In-page hotkey fallback
   document.addEventListener('keydown', handleHotkey);
+
+  // Load the saved theme, and keep it live if changed from the options page.
+  loadTheme();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.settings) {
+      const t = changes.settings.newValue && changes.settings.newValue.theme;
+      if (t && t !== currentTheme) applyTheme(t);
+    }
+  });
 }
 
 // Handle hotkey (Alt+Shift+A — Option key on Mac, Alt+Shift+K for Welcome Bubble)
@@ -234,7 +279,6 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
         threadHTML += `
           <div class="cps-message cps-assistant-message">
             <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-            ${msg.confidence ? `<div class="cps-message-confidence">Confidence: ${Math.round(msg.confidence)}%</div>` : ''}
           </div>
         `;
       }
@@ -307,13 +351,6 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
             timestamp: Date.now()
           });
         }
-
-        // Show and update confidence indicator
-        const confidenceSection = overlayWindow.querySelector('.cps-confidence');
-        if (confidenceSection) {
-          confidenceSection.style.display = 'block';
-        }
-        updateConfidence(confidence);
 
         // Save to conversation history
         if (!isFollowUp) {
@@ -396,8 +433,12 @@ function showOverlayWindow() {
 function bubbleShellHTML() {
   return `
     <div class="cps-header">
-      <div class="cps-title">Welcome to ProblemSolver ✨</div>
+      <div class="cps-titlewrap">
+        <span class="cps-title">AI Problem Solver</span>
+        <span class="cps-version"></span>
+      </div>
       <div class="cps-controls">
+        <button class="cps-btn cps-theme-toggle" title="Toggle theme">☀️</button>
         <button class="cps-btn cps-close" title="Close">×</button>
       </div>
     </div>
@@ -423,8 +464,12 @@ function bubbleShellHTML() {
 function analysisShellHTML() {
   return `
     <div class="cps-header">
-      <div class="cps-title">Chrome Problem Solver</div>
+      <div class="cps-titlewrap">
+        <span class="cps-title">AI Problem Solver</span>
+        <span class="cps-version"></span>
+      </div>
       <div class="cps-controls">
+        <button class="cps-btn cps-theme-toggle" title="Toggle theme">☀️</button>
         <button class="cps-btn cps-minimize" title="Minimize">−</button>
         <button class="cps-btn cps-close" title="Close">×</button>
       </div>
@@ -440,13 +485,6 @@ function analysisShellHTML() {
           <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
           <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
           <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
-        </div>
-        <div class="cps-confidence">
-          <div class="cps-confidence-label">Confidence</div>
-          <div class="cps-confidence-bar">
-            <div class="cps-confidence-fill"></div>
-          </div>
-          <div class="cps-confidence-percentage">0%</div>
         </div>
         <div class="cps-followup">
           <div class="cps-followup-input-wrapper">
@@ -509,9 +547,25 @@ function createOverlayWindow(mode = 'analysis') {
 
 // Setup window controls
 function setupWindowControls() {
+  // The shell markup is rebuilt on every mode morph, so (re)apply theme, stamp
+  // the live version, and wire the theme toggle here each time.
+  overlayWindow.dataset.theme = currentTheme;
+
+  const versionEl = overlayWindow.querySelector('.cps-version');
+  if (versionEl) versionEl.textContent = 'v' + (chrome.runtime.getManifest().version || '');
+
+  const themeBtn = overlayWindow.querySelector('.cps-theme-toggle');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    });
+  }
+  updateThemeButton();
+
   const minimizeBtn = overlayWindow.querySelector('.cps-minimize');
   const closeBtn = overlayWindow.querySelector('.cps-close');
-  
+
   if (minimizeBtn) {
     minimizeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -816,6 +870,7 @@ function sendFollowUp() {
 function showFeedbackModal() {
   const modal = document.createElement('div');
   modal.className = 'cps-modal';
+  modal.dataset.theme = currentTheme;
   modal.innerHTML = `
     <div class="cps-modal-content">
       <div class="cps-modal-header">
@@ -881,7 +936,6 @@ function displayLoading() {
   }
   
   const responseArea = overlayWindow?.querySelector('.cps-response-area');
-  const confidenceSection = overlayWindow?.querySelector('.cps-confidence');
 
   if (!responseArea) return;
 
@@ -898,11 +952,6 @@ function displayLoading() {
       <p>Analyzing...</p>
     </div>
   `;
-
-  // Hide confidence indicator during loading
-  if (confidenceSection) {
-    confidenceSection.style.display = 'none';
-  }
 
   // Switch to main tab
   const mainTab = overlayWindow.querySelector('[data-tab="main"]');
@@ -930,7 +979,6 @@ function displayResponse(response, confidence, responseTime, isFollowUp = false)
         threadHTML += `
           <div class="cps-message cps-assistant-message">
             <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-            ${msg.confidence ? `<div class="cps-message-confidence">Confidence: ${Math.round(msg.confidence)}%</div>` : ''}
           </div>
         `;
       }
@@ -945,13 +993,6 @@ function displayResponse(response, confidence, responseTime, isFollowUp = false)
 
   // Highlight code and render math in whatever was just inserted.
   enhanceElement(responseArea);
-
-  // Show and update confidence indicator
-  const confidenceSection = overlayWindow.querySelector('.cps-confidence');
-  if (confidenceSection) {
-    confidenceSection.style.display = 'block';
-  }
-  updateConfidence(confidence);
 
   // Store current conversation
   currentConversation = {
@@ -1058,31 +1099,12 @@ function enhanceElement(el) {
 function displayError(error) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
   responseArea.innerHTML = `<div class="cps-error">Error: ${escapeHtml(error)}</div>`;
-  updateConfidence(0);
 }
 
 // Display message
 function displayMessage(message) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
   responseArea.innerHTML = `<div class="cps-message">${escapeHtml(message)}</div>`;
-}
-
-// Update confidence indicator
-function updateConfidence(confidence) {
-  const fill = overlayWindow.querySelector('.cps-confidence-fill');
-  const percentage = overlayWindow.querySelector('.cps-confidence-percentage');
-
-  fill.style.width = `${confidence}%`;
-  percentage.textContent = `${Math.round(confidence)}%`;
-
-  // Update color based on confidence
-  if (confidence >= 80) {
-    fill.style.backgroundColor = '#4caf50';
-  } else if (confidence >= 60) {
-    fill.style.backgroundColor = '#ff9800';
-  } else {
-    fill.style.backgroundColor = '#f44336';
-  }
 }
 
 // Add to conversation history
@@ -1132,7 +1154,6 @@ function loadHistory() {
         <div class="cps-history-item" data-index="${index}">
           <div class="cps-history-header">
             <span class="cps-history-time">${date.toLocaleString()}</span>
-            <span class="cps-history-confidence">${Math.round(item.confidence)}%</span>
           </div>
           <div class="cps-history-text">${escapeHtml(item.text.substring(0, 100))}${item.text.length > 100 ? '...' : ''}</div>
         </div>
@@ -1169,7 +1190,6 @@ function displayHistoryItem(item) {
         threadHTML += `
           <div class="cps-message cps-assistant-message">
             <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-            ${msg.confidence ? `<div class="cps-message-confidence">Confidence: ${Math.round(msg.confidence)}%</div>` : ''}
           </div>
         `;
       }
@@ -1178,7 +1198,6 @@ function displayHistoryItem(item) {
     threadHTML += '</div>';
     responseArea.innerHTML = threadHTML;
     enhanceElement(responseArea);
-    updateConfidence(item.confidence);
   } else {
     displayResponse(item.response, item.confidence, item.responseTime);
   }

@@ -1,4 +1,4 @@
-// Chrome Problem Solver - Analytics Page Script
+// AI Problem Solver - Analytics Page Script
 
 let usageData = null;
 

@@ -1,4 +1,4 @@
-# Chrome Problem Solver
+# AI Problem Solver
 
 An AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. Leverages OpenAI and Claude AI to deliver contextually aware, well-formatted responses with excellent performance.
 

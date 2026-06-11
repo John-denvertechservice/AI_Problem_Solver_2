@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chrome Problem Solver - Settings</title>
+  <title>AI Problem Solver - Settings</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
   <div class="options-container">
     <header class="options-header">
-      <h1>Chrome Problem Solver</h1>
+      <h1>AI Problem Solver</h1>
       <p class="options-subtitle">Configure your AI assistant settings</p>
     </header>
 
@@ -99,6 +99,20 @@
 
       <!-- Preferences Tab -->
       <div class="options-tab-content" data-content="preferences">
+        <section class="options-section">
+          <h2>Appearance</h2>
+          <p class="section-description">Choose the look of the in-page analysis overlay</p>
+
+          <div class="model-selector">
+            <label for="theme-select">Theme</label>
+            <select id="theme-select" class="options-select">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+            <p class="field-hint">Applies to the overlay on web pages. Changes take effect immediately.</p>
+          </div>
+        </section>
+
         <section class="options-section">
           <h2>Usage Tracking</h2>
           <p class="section-description">Manage your usage data and statistics</p>

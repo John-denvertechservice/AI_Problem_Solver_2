@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Chrome Problem Solver",
-  "version": "1.0.0",
+  "name": "AI Problem Solver",
+  "version": "2.0.0",
   "description": "AI-powered assistant for solving math, logic, and coding problems with OpenAI and Claude",
   "permissions": [
     "activeTab",

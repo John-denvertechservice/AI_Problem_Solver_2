@@ -1,4 +1,4 @@
-// Chrome Problem Solver - Options Page Script
+// AI Problem Solver - Options Page Script
 
 const OPENAI_MODELS = {
   'gpt-4.1-nano': 'GPT-4.1 Nano',
@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupProviderCards();
   setupModelSelector();
   setupToggleVisibility();
+  setupThemeSelector();
   setupSaveButton();
   setupDataButtons();
 });
@@ -56,6 +57,25 @@ function applySettings() {
   
   // Preferences
   document.getElementById('track-usage').checked = currentSettings.trackUsage !== false;
+
+  // Theme
+  const themeSelect = document.getElementById('theme-select');
+  if (themeSelect) themeSelect.value = currentSettings.theme === 'light' ? 'light' : 'dark';
+}
+
+// Theme selector — persist immediately so the in-page overlay updates live via
+// chrome.storage.onChanged, without waiting for the Save button.
+function setupThemeSelector() {
+  const select = document.getElementById('theme-select');
+  if (!select) return;
+  select.addEventListener('change', () => {
+    currentSettings.theme = select.value === 'light' ? 'light' : 'dark';
+    chrome.storage.sync.get(['settings'], (result) => {
+      const settings = result.settings || {};
+      settings.theme = currentSettings.theme;
+      chrome.storage.sync.set({ settings });
+    });
+  });
 }
 
 // Setup tabs

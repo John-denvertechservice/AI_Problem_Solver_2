@@ -1,8 +1,8 @@
-# Chrome Problem Solver - Agent Collaboration Guide
+# AI Problem Solver - Agent Collaboration Guide
 
 ## Project Overview
 
-**Chrome Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages the OpenAI and Anthropic Claude APIs to deliver contextually aware, well-formatted responses.
+**AI Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages the OpenAI and Anthropic Claude APIs to deliver contextually aware, well-formatted responses.
 
 > **This is the comprehensive reference.** For a quick start — how to load and test the unpacked extension, the `content.js` → `background.js` → API message flow, and the core code-level constraints — see **[CLAUDE.md](CLAUDE.md)**. This guide goes deeper on features, the decision tree, API integration, storage, and collaboration; CLAUDE.md is the fast orientation.
 
@@ -161,7 +161,7 @@ The extension follows a structured decision tree to ensure consistent AI respons
 The extension can be invoked four ways (all defined in `manifest.json` and wired up in `background.js`):
 - **Analyze hotkey**: `Alt+Shift+A` (the `analyze-selection` command) — analyzes the current text/image selection. On macOS, Alt is the Option key.
 - **Welcome bubble hotkey**: `Alt+Shift+K` (the `welcome-bubble` command) — opens the welcome bubble.
-- **Context menu**: Right-click → "Analyze with Chrome Problem Solver" (available on selection, image, and page contexts).
+- **Context menu**: Right-click → "Analyze with AI Problem Solver" (available on selection, image, and page contexts).
 - **Toolbar icon**: Clicking the extension's toolbar icon analyzes the current selection.
 - **Behavior**: Opens the overlay pane in the bottom-right corner. The background worker only messages `http(s)://` and `file://` tabs, so triggers are silently ignored on `chrome://` and Web Store pages.
 

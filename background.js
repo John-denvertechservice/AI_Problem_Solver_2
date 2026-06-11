@@ -1,4 +1,4 @@
-// Chrome Problem Solver - Background Service Worker
+// AI Problem Solver - Background Service Worker
 // Handles AI API calls, decision tree logic, and prompt engineering.
 // Only the streaming path is used by the UI; chunks/final/error are pushed to
 // the originating tab via chrome.tabs.sendMessage.
@@ -38,7 +38,7 @@ function initializeContextMenu() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'cps-analyze-selection',
-      title: 'Analyze with Chrome Problem Solver',
+      title: 'Analyze with AI Problem Solver',
       contexts: ['selection', 'image', 'page']
     });
   });
