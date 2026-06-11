@@ -35,7 +35,7 @@ To test keyboard shortcuts: `chrome://extensions/shortcuts`
 'gpt-4.1-nano', 'gpt-4.1-mini', 'gpt-4.1'
 
 // Claude (background.js)
-'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'
+'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'
 ```
 
 When adding new models, update the model maps in **both** `background.js` and `options.js`. Full model IDs with display names, default fallbacks, and endpoints live in [agents.md → API Integration](agents.md#api-integration).

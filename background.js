@@ -21,7 +21,7 @@ const OPENAI_MODELS = {
 const CLAUDE_MODELS = {
   'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', vision: true },
   'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', vision: true },
-  'claude-opus-4-7': { name: 'Claude Opus 4.7', vision: true }
+  'claude-opus-4-8': { name: 'Claude Opus 4.8', vision: true }
 };
 
 // Initialize context menu
