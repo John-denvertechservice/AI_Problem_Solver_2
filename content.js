@@ -58,10 +58,6 @@ function init() {
   
   // In-page hotkey fallback
   document.addEventListener('keydown', handleHotkey);
-  
-  // Listen for selection changes
-  document.addEventListener('mouseup', handleSelectionChange);
-  document.addEventListener('keyup', handleSelectionChange);
 }
 
 // Handle hotkey (Alt+Shift+A — Option key on Mac, Alt+Shift+K for Welcome Bubble)
@@ -92,11 +88,6 @@ function handleHotkey(event) {
     event.preventDefault();
     handleWelcomeBubbleHotkey();
   }
-}
-
-// Handle selection change
-function handleSelectionChange() {
-  // This can be used for future enhancements like showing a hint
 }
 
 // Get selected text or image
@@ -264,7 +255,10 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
   }
 
   const streamingContent = responseArea.querySelector('#streaming-content');
-  
+  // During streaming we append raw text (pre-wrap preserves newlines/indent);
+  // the final render swaps in formatted markdown and resets this.
+  if (streamingContent) streamingContent.style.whiteSpace = 'pre-wrap';
+
   // Set up message listener for streaming
   const messageListener = (request, sender, sendResponse) => {
     // Ignore anything belonging to a different (e.g. superseded) request.
@@ -272,7 +266,9 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
     if (request.action === 'streamChunk') {
       streamedResponse += request.chunk;
       if (streamingContent) {
-        streamingContent.innerHTML = formatStreaming(streamedResponse);
+        // Append just the new delta (O(1)); textContent can't inject markup, so
+        // raw partial text is safe to show until the final markdown render.
+        streamingContent.textContent += request.chunk;
         // Auto-scroll to bottom
         responseArea.scrollTop = responseArea.scrollHeight;
       }
@@ -292,6 +288,7 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
       // complete text is available, then enhance (highlight + KaTeX). An empty
       // result means the user stopped before any text arrived.
       if (streamingContent) {
+        streamingContent.style.whiteSpace = ''; // drop the streaming pre-wrap
         if (finalResponse) {
           streamingContent.innerHTML = formatResponse(finalResponse);
           enhanceElement(streamingContent);
@@ -394,104 +391,119 @@ function showOverlayWindow() {
   restoreWindowState();
 }
 
+// Overlay markup, shared by createOverlayWindow() and the morph helpers so the
+// two modes are defined in exactly one place each.
+function bubbleShellHTML() {
+  return `
+    <div class="cps-header">
+      <div class="cps-title">Welcome to ProblemSolver ✨</div>
+      <div class="cps-controls">
+        <button class="cps-btn cps-close" title="Close">×</button>
+      </div>
+    </div>
+    <div class="cps-bubble-content">
+      <div class="cps-bubble-input-wrapper">
+        <input
+          type="text"
+          class="cps-bubble-input"
+          placeholder="ask anything!"
+          id="bubble-text-input"
+        />
+        <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
+      </div>
+      <button class="cps-bubble-upload-btn" id="bubble-upload-btn">Upload image</button>
+      <input type="file" accept="image/*" id="bubble-file-input" style="display: none;" />
+      <div class="cps-bubble-dropzone" id="bubble-dropzone">
+        Drag & drop an image to analyze instantly
+      </div>
+    </div>
+  `;
+}
+
+function analysisShellHTML() {
+  return `
+    <div class="cps-header">
+      <div class="cps-title">Chrome Problem Solver</div>
+      <div class="cps-controls">
+        <button class="cps-btn cps-minimize" title="Minimize">−</button>
+        <button class="cps-btn cps-close" title="Close">×</button>
+      </div>
+    </div>
+    <div class="cps-tabs">
+      <button class="cps-tab active" data-tab="main">Analysis</button>
+      <button class="cps-tab" data-tab="history">History</button>
+    </div>
+    <div class="cps-content">
+      <div class="cps-tab-content active" data-content="main">
+        <div class="cps-response-area"></div>
+        <div class="cps-actions">
+          <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
+          <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
+          <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
+        </div>
+        <div class="cps-confidence">
+          <div class="cps-confidence-label">Confidence</div>
+          <div class="cps-confidence-bar">
+            <div class="cps-confidence-fill"></div>
+          </div>
+          <div class="cps-confidence-percentage">0%</div>
+        </div>
+        <div class="cps-followup">
+          <div class="cps-followup-input-wrapper">
+            <textarea
+              class="cps-followup-input"
+              placeholder="Ask a follow up or clarification!"
+              maxlength="500"
+              rows="2"
+            ></textarea>
+            <div class="cps-word-count">0/50 words</div>
+          </div>
+          <button class="cps-send-btn" id="send-followup">Send</button>
+        </div>
+        <div class="cps-feedback">
+          <button class="cps-feedback-btn cps-like" title="Like">👍</button>
+          <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
+        </div>
+      </div>
+      <div class="cps-tab-content" data-content="history">
+        <div class="cps-history-list"></div>
+      </div>
+    </div>
+    <div class="cps-resize-handle" title="Drag to resize"></div>
+  `;
+}
+
+// Wire up the controls for a freshly-rendered shell.
+function wireBubbleShell() {
+  setupWindowControls();
+  setupWelcomeBubbleDragDrop();
+  setupWelcomeBubbleSubmit();
+}
+
+function wireAnalysisShell() {
+  setupWindowControls();
+  setupTabs();
+  setupFeedback();
+  setupFollowUp();
+  setupActions();
+}
+
 // Create overlay window
 function createOverlayWindow(mode = 'analysis') {
   overlayWindow = document.createElement('div');
   overlayWindow.id = 'chrome-problem-solver-overlay';
   overlayMode = mode;
   overlayWindow.className = `cps-mode-${mode}`;
-  
-  if (mode === 'bubble') {
-    overlayWindow.innerHTML = `
-      <div class="cps-header">
-        <div class="cps-title">Welcome to ProblemSolver ✨</div>
-        <div class="cps-controls">
-          <button class="cps-btn cps-close" title="Close">×</button>
-        </div>
-      </div>
-      <div class="cps-bubble-content">
-        <div class="cps-bubble-input-wrapper">
-          <input 
-            type="text" 
-            class="cps-bubble-input" 
-            placeholder="ask anything!"
-            id="bubble-text-input"
-          />
-          <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
-        </div>
-        <button class="cps-bubble-upload-btn" id="bubble-upload-btn">Upload image</button>
-        <input type="file" accept="image/*" id="bubble-file-input" style="display: none;" />
-        <div class="cps-bubble-dropzone" id="bubble-dropzone">
-          Drag & drop an image to analyze instantly
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(overlayWindow);
-    // Use setTimeout to ensure DOM is ready
-    setTimeout(() => {
-      setupWindowControls();
-      setupWelcomeBubbleDragDrop();
-      setupWelcomeBubbleSubmit();
-    }, 0);
-  } else {
-    overlayWindow.innerHTML = `
-      <div class="cps-header">
-        <div class="cps-title">Chrome Problem Solver</div>
-        <div class="cps-controls">
-          <button class="cps-btn cps-minimize" title="Minimize">−</button>
-          <button class="cps-btn cps-close" title="Close">×</button>
-        </div>
-      </div>
-      <div class="cps-tabs">
-        <button class="cps-tab active" data-tab="main">Analysis</button>
-        <button class="cps-tab" data-tab="history">History</button>
-      </div>
-      <div class="cps-content">
-        <div class="cps-tab-content active" data-content="main">
-          <div class="cps-response-area"></div>
-          <div class="cps-actions">
-            <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
-            <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
-            <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
-          </div>
-          <div class="cps-confidence">
-            <div class="cps-confidence-label">Confidence</div>
-            <div class="cps-confidence-bar">
-              <div class="cps-confidence-fill"></div>
-            </div>
-            <div class="cps-confidence-percentage">0%</div>
-          </div>
-          <div class="cps-followup">
-            <div class="cps-followup-input-wrapper">
-              <textarea
-                class="cps-followup-input"
-                placeholder="Ask a follow up or clarification!"
-                maxlength="500"
-                rows="2"
-              ></textarea>
-              <div class="cps-word-count">0/50 words</div>
-            </div>
-            <button class="cps-send-btn" id="send-followup">Send</button>
-          </div>
-          <div class="cps-feedback">
-            <button class="cps-feedback-btn cps-like" title="Like">👍</button>
-            <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
-          </div>
-        </div>
-        <div class="cps-tab-content" data-content="history">
-          <div class="cps-history-list"></div>
-        </div>
-      </div>
-      <div class="cps-resize-handle" title="Drag to resize"></div>
-    `;
 
+  if (mode === 'bubble') {
+    overlayWindow.innerHTML = bubbleShellHTML();
     document.body.appendChild(overlayWindow);
-    setupWindowControls();
-    setupTabs();
-    setupFeedback();
-    setupFollowUp();
-    setupActions();
+    // setTimeout ensures the appended DOM is queryable before wiring.
+    setTimeout(wireBubbleShell, 0);
+  } else {
+    overlayWindow.innerHTML = analysisShellHTML();
+    document.body.appendChild(overlayWindow);
+    wireAnalysisShell();
   }
 }
 
@@ -974,6 +986,22 @@ const MATH_DELIMITERS = [
   { left: '$', right: '$', display: false }
 ];
 
+// Harden sanitized output: external links open in a new tab without leaking the
+// opener or referrer, and images don't leak the referrer. Registered once at
+// load (DOMPurify is injected before this script per the manifest).
+if (typeof DOMPurify !== 'undefined') {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A') {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer nofollow');
+    }
+    if (node.tagName === 'IMG') {
+      node.setAttribute('referrerpolicy', 'no-referrer');
+      node.setAttribute('loading', 'lazy');
+    }
+  });
+}
+
 // Render a markdown/LaTeX response to safe HTML.
 // Pipeline: stash math -> marked (GFM) -> DOMPurify (input is untrusted!) -> restore math.
 // Code highlighting and KaTeX run afterward via enhanceElement() on the live DOM.
@@ -1005,13 +1033,6 @@ function formatResponse(text) {
   // 4) Restore math as escaped text for KaTeX auto-render to pick up later.
   html = html.replace(/@@KMATH(\d+)@@/g, (_, i) => escapeHtml(mathSpans[Number(i)] || ''));
   return html;
-}
-
-// Lightweight formatter for streaming chunks: cheap and safe, no markdown/math
-// passes (those would re-run on every token). The full render happens once the
-// stream completes, in the streamComplete/streamFinal handler.
-function formatStreaming(text) {
-  return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
 // After response HTML is in the DOM, syntax-highlight code blocks and render math.
@@ -1194,37 +1215,10 @@ function morphToBubbleMode() {
   
   overlayMode = 'bubble';
   overlayWindow.className = 'cps-mode-bubble';
-  overlayWindow.innerHTML = `
-    <div class="cps-header">
-      <div class="cps-title">Welcome to ProblemSolver ✨</div>
-      <div class="cps-controls">
-        <button class="cps-btn cps-close" title="Close">×</button>
-      </div>
-    </div>
-    <div class="cps-bubble-content">
-      <div class="cps-bubble-input-wrapper">
-        <input 
-          type="text" 
-          class="cps-bubble-input" 
-          placeholder="ask anything!"
-          id="bubble-text-input"
-        />
-        <button class="cps-bubble-go-btn" id="bubble-go-btn">Go</button>
-      </div>
-      <button class="cps-bubble-upload-btn" id="bubble-upload-btn">Upload image</button>
-      <input type="file" accept="image/*" id="bubble-file-input" style="display: none;" />
-      <div class="cps-bubble-dropzone" id="bubble-dropzone">
-        Drag & drop an image to analyze instantly
-      </div>
-    </div>
-  `;
-  
-  // Use setTimeout to ensure DOM is ready
-  setTimeout(() => {
-    setupWindowControls();
-    setupWelcomeBubbleDragDrop();
-    setupWelcomeBubbleSubmit();
-  }, 0);
+  overlayWindow.innerHTML = bubbleShellHTML();
+
+  // setTimeout ensures the new DOM is queryable before wiring.
+  setTimeout(wireBubbleShell, 0);
 }
 
 // Morph overlay to analysis mode
@@ -1233,62 +1227,8 @@ function morphToAnalysisMode() {
   
   overlayMode = 'analysis';
   overlayWindow.className = 'cps-mode-analysis';
-  overlayWindow.innerHTML = `
-    <div class="cps-header">
-      <div class="cps-title">Chrome Problem Solver</div>
-      <div class="cps-controls">
-        <button class="cps-btn cps-minimize" title="Minimize">−</button>
-        <button class="cps-btn cps-close" title="Close">×</button>
-      </div>
-    </div>
-    <div class="cps-tabs">
-      <button class="cps-tab active" data-tab="main">Analysis</button>
-      <button class="cps-tab" data-tab="history">History</button>
-    </div>
-    <div class="cps-content">
-      <div class="cps-tab-content active" data-content="main">
-        <div class="cps-response-area"></div>
-        <div class="cps-actions">
-          <button class="cps-action-btn cps-stop" title="Stop generating" style="display:none;">⏹ Stop</button>
-          <button class="cps-action-btn cps-copy" title="Copy answer" style="display:none;">📋 Copy</button>
-          <button class="cps-action-btn cps-regenerate" title="Regenerate answer" style="display:none;">🔄 Regenerate</button>
-        </div>
-        <div class="cps-confidence">
-          <div class="cps-confidence-label">Confidence</div>
-          <div class="cps-confidence-bar">
-            <div class="cps-confidence-fill"></div>
-          </div>
-          <div class="cps-confidence-percentage">0%</div>
-        </div>
-        <div class="cps-followup">
-          <div class="cps-followup-input-wrapper">
-            <textarea
-              class="cps-followup-input"
-              placeholder="Ask a follow up or clarification!"
-              maxlength="500"
-              rows="2"
-            ></textarea>
-            <div class="cps-word-count">0/50 words</div>
-          </div>
-          <button class="cps-send-btn" id="send-followup">Send</button>
-        </div>
-        <div class="cps-feedback">
-          <button class="cps-feedback-btn cps-like" title="Like">👍</button>
-          <button class="cps-feedback-btn cps-dislike" title="Dislike">👎</button>
-        </div>
-      </div>
-      <div class="cps-tab-content" data-content="history">
-        <div class="cps-history-list"></div>
-      </div>
-    </div>
-    <div class="cps-resize-handle" title="Drag to resize"></div>
-  `;
-
-  setupWindowControls();
-  setupTabs();
-  setupFeedback();
-  setupFollowUp();
-  setupActions();
+  overlayWindow.innerHTML = analysisShellHTML();
+  wireAnalysisShell();
 }
 
 // Setup Welcome Bubble drag & drop

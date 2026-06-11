@@ -2,6 +2,18 @@
 
 let usageData = null;
 
+// Escape untrusted values before interpolating into innerHTML. Stored fields
+// (API error messages, provider/model names) can contain markup, and this page
+// runs in the privileged extension origin.
+function escapeHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadAnalytics();
@@ -85,7 +97,7 @@ function updateModelStats(data) {
       return `
         <div class="model-stat-item">
           <div class="model-stat-header">
-            <span class="model-name">${formatModelName(model)}</span>
+            <span class="model-name">${escapeHtml(formatModelName(model))}</span>
             <span class="model-count">${count}</span>
           </div>
           <div class="model-stat-bar">
@@ -117,7 +129,7 @@ function updateContentTypeStats(data) {
       return `
         <div class="content-type-item">
           <div class="content-type-header">
-            <span class="content-type-name">${typeLabel}</span>
+            <span class="content-type-name">${escapeHtml(typeLabel)}</span>
             <span class="content-type-count">${count}</span>
           </div>
           <div class="content-type-bar">
@@ -155,12 +167,12 @@ function updateRecentActivity(history) {
           <span class="activity-status">${success ? '✅' : '❌'}</span>
         </div>
         <div class="activity-details">
-          <span class="activity-provider">${provider}</span>
+          <span class="activity-provider">${escapeHtml(provider)}</span>
           <span class="activity-separator">•</span>
-          <span class="activity-model">${formatModelName(model)}</span>
+          <span class="activity-model">${escapeHtml(formatModelName(model))}</span>
           ${item.responseTime ? `<span class="activity-separator">•</span><span class="activity-time">${Math.round(item.responseTime)}ms</span>` : ''}
         </div>
-        ${item.error ? `<div class="activity-error">${item.error}</div>` : ''}
+        ${item.error ? `<div class="activity-error">${escapeHtml(item.error)}</div>` : ''}
       </div>
     `;
   }).join('');
