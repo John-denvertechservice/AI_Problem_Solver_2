@@ -84,7 +84,7 @@ Chrome_Problem_Solver2/
 - **Manifest Version**: V3 (Modern Chrome extension architecture)
 - **AI Providers**: 
   - OpenAI API (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano)
-  - Claude API (Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5)
+  - Claude API (Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5)
 - **Storage**: Chrome sync storage for API keys and settings
 - **Architecture**: Content scripts + Background service worker
 
@@ -217,7 +217,7 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 - **Endpoint**: `POST https://api.openai.com/v1/chat/completions`, called from the background service worker
 
 ### Claude API
-- **Models**: `claude-sonnet-4-6` (Claude Sonnet 4.6, default fallback), `claude-haiku-4-5-20251001` (Claude Haiku 4.5), `claude-opus-4-7` (Claude Opus 4.7)
+- **Models**: `claude-sonnet-4-6` (Claude Sonnet 4.6, default fallback), `claude-haiku-4-5-20251001` (Claude Haiku 4.5), `claude-opus-4-8` (Claude Opus 4.8)
 - **Vision**: All Claude models support image analysis
 - **Endpoint**: `POST https://api.anthropic.com/v1/messages`, called from the background service worker
 - **API version header**: `anthropic-version: 2023-06-01`; uses `anthropic-dangerous-direct-browser-access` for direct calls from the worker

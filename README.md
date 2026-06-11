@@ -4,7 +4,7 @@ An AI-powered Chrome extension that provides accurate, user-friendly assistance 
 
 ## Features
 
-- **AI-Powered Analysis**: Supports both OpenAI (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano) and Claude (Opus 4.7, Sonnet 4.6, Haiku 4.5) models
+- **AI-Powered Analysis**: Supports both OpenAI (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano) and Claude (Opus 4.8, Sonnet 4.6, Haiku 4.5) models
 - **Smart Decision Tree**: Automatically detects content type (math, code, questions, etc.) and formats responses accordingly
 - **Image Analysis**: Analyze images, charts, and screenshots using vision APIs
 - **Beautiful UI**: Chrome-inspired shiny, modern design with glossy surfaces
