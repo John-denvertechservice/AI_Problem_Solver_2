@@ -29,19 +29,22 @@ function loadAnalytics() {
       failedRequests: 0,
       totalResponseTime: 0,
       averageResponseTime: 0,
-      byProvider: {},
       byModel: {},
       byContentType: {},
       history: []
     };
-    
+
     const conversationHistory = result.conversationHistory || [];
-    
+
     updateOverview(usageData, conversationHistory);
-    updateProviderStats(usageData);
     updateModelStats(usageData);
     updateContentTypeStats(usageData);
     updateRecentActivity(usageData.history);
+
+    // Cost panel needs the monthly budget, which lives in sync settings.
+    chrome.storage.sync.get(['settings'], (r) => {
+      updateCostStats(usageData, (r.settings && Number(r.settings.monthlyBudgetUsd)) || 0);
+    });
   });
 }
 
@@ -60,21 +63,39 @@ function updateOverview(data, conversations) {
   document.getElementById('total-conversations').textContent = conversations.length || 0;
 }
 
-// Update provider stats
-function updateProviderStats(data) {
-  const openaiCount = data.byProvider?.openai || 0;
-  const claudeCount = data.byProvider?.claude || 0;
-  const total = openaiCount + claudeCount;
-  
-  document.getElementById('openai-count').textContent = openaiCount;
-  document.getElementById('claude-count').textContent = claudeCount;
-  
-  if (total > 0) {
-    document.getElementById('openai-percentage').textContent = `${Math.round((openaiCount / total) * 100)}%`;
-    document.getElementById('claude-percentage').textContent = `${Math.round((claudeCount / total) * 100)}%`;
+// Update cost / spending stats from the usage history. Each history entry written
+// on a successful request carries costUsd and token counts.
+function updateCostStats(data, monthlyBudgetUsd) {
+  const history = data.history || [];
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+  let totalCost = 0;
+  let totalTokens = 0;
+  let monthCost = 0;
+
+  history.forEach((item) => {
+    const cost = Number(item.costUsd) || 0;
+    totalCost += cost;
+    totalTokens += (Number(item.inputTokens) || 0) + (Number(item.outputTokens) || 0);
+    if (item.timestamp >= monthStart) monthCost += cost;
+  });
+
+  document.getElementById('total-cost').textContent = `$${totalCost.toFixed(4)}`;
+  document.getElementById('total-tokens').textContent = `${totalTokens.toLocaleString()} tokens`;
+  document.getElementById('month-cost').textContent = `$${monthCost.toFixed(4)}`;
+
+  const status = document.getElementById('budget-status');
+  if (monthlyBudgetUsd > 0) {
+    const pct = Math.round((monthCost / monthlyBudgetUsd) * 100);
+    const over = monthCost > monthlyBudgetUsd;
+    status.textContent = over
+      ? `⚠ ${pct}% — over $${monthlyBudgetUsd} budget`
+      : `${pct}% of $${monthlyBudgetUsd} budget`;
+    status.style.color = over ? '#f44336' : '';
   } else {
-    document.getElementById('openai-percentage').textContent = '0%';
-    document.getElementById('claude-percentage').textContent = '0%';
+    status.textContent = 'No budget set';
+    status.style.color = '';
   }
 }
 
@@ -154,12 +175,10 @@ function updateRecentActivity(history) {
   const recent = history.slice(-10).reverse();
   
   activityList.innerHTML = recent.map(item => {
-    const date = new Date(item.timestamp);
     const timeAgo = getTimeAgo(item.timestamp);
-    const provider = item.provider || 'unknown';
-    const model = item.model || 'unknown';
     const success = item.success !== false;
-    
+    const cost = Number(item.costUsd) || 0;
+
     return `
       <div class="activity-item ${success ? 'success' : 'error'}">
         <div class="activity-header">
@@ -167,10 +186,10 @@ function updateRecentActivity(history) {
           <span class="activity-status">${success ? '✅' : '❌'}</span>
         </div>
         <div class="activity-details">
-          <span class="activity-provider">${escapeHtml(provider)}</span>
-          <span class="activity-separator">•</span>
-          <span class="activity-model">${escapeHtml(formatModelName(model))}</span>
+          <span class="activity-model">${escapeHtml(formatModelName(item.model))}</span>
+          ${item.contentType ? `<span class="activity-separator">•</span><span class="activity-type">${escapeHtml(item.contentType)}</span>` : ''}
           ${item.responseTime ? `<span class="activity-separator">•</span><span class="activity-time">${Math.round(item.responseTime)}ms</span>` : ''}
+          ${cost > 0 ? `<span class="activity-separator">•</span><span class="activity-cost">$${cost.toFixed(4)}</span>` : ''}
         </div>
         ${item.error ? `<div class="activity-error">${escapeHtml(item.error)}</div>` : ''}
       </div>
@@ -181,15 +200,10 @@ function updateRecentActivity(history) {
 // Format model name
 function formatModelName(model) {
   const modelMap = {
-    'gpt-4.1-nano': 'GPT-4.1 Nano',
-    'gpt-4.1-mini': 'GPT-4.1 Mini',
-    'gpt-4.1': 'GPT-4.1',
-    'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
-    'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-    'claude-opus-4-8': 'Claude Opus 4.8'
+    'claude-haiku-4-5-20251001': 'Claude Haiku 4.5'
   };
-  
-  return modelMap[model] || model;
+
+  return modelMap[model] || model || 'unknown';
 }
 
 // Get time ago
@@ -220,7 +234,7 @@ function setupButtons() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `chrome-problem-solver-analytics-${Date.now()}.json`;
+      a.download = `ai-problem-solver-analytics-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     });

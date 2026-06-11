@@ -10,7 +10,9 @@ let overlayMode = 'analysis'; // 'bubble' or 'analysis'
 let activeRequestId = null;      // id of the in-flight streaming request, if any
 let activeStreamListener = null; // its chrome.runtime.onMessage listener
 let lastResponseText = '';       // raw markdown of the latest answer (for Copy)
+let lastFollowUpText = '';       // last follow-up the user sent (for ↑ recall)
 let currentTheme = 'dark';       // 'dark' | 'light' — persisted in settings.theme
+let currentAnswerStyle = 'answer'; // 'answer' | 'explain' — persisted in settings.answerStyle
 
 // Unique id per streaming request so chunks/finals from one request can never
 // be applied to another (overlapping requests previously interleaved).
@@ -60,6 +62,30 @@ function loadTheme() {
   });
 }
 
+// ── Answer style (just-the-answer / concept-explainer) ───────────────────────
+// Persisted in settings.answerStyle and read by background.js when building the
+// prompt. The overlay selector and the options page stay in sync via storage.
+function applyAnswerStyle(style) {
+  currentAnswerStyle = style === 'explain' ? 'explain' : 'answer';
+  const select = overlayWindow && overlayWindow.querySelector('.cps-style-select');
+  if (select && select.value !== currentAnswerStyle) select.value = currentAnswerStyle;
+}
+
+function setAnswerStyle(style) {
+  applyAnswerStyle(style);
+  chrome.storage.sync.get(['settings'], (r) => {
+    const settings = r.settings || {};
+    settings.answerStyle = currentAnswerStyle;
+    chrome.storage.sync.set({ settings });
+  });
+}
+
+function loadAnswerStyle() {
+  chrome.storage.sync.get(['settings'], (r) => {
+    applyAnswerStyle(r.settings && r.settings.answerStyle === 'explain' ? 'explain' : 'answer');
+  });
+}
+
 // Initialize on page load
 (function() {
   // Wait for DOM to be ready
@@ -95,20 +121,34 @@ function init() {
   // In-page hotkey fallback
   document.addEventListener('keydown', handleHotkey);
 
-  // Load the saved theme, and keep it live if changed from the options page.
+  // Load saved theme + answer style, and keep them live if changed elsewhere
+  // (options page, or the overlay in another tab).
   loadTheme();
+  loadAnswerStyle();
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes.settings) {
-      const t = changes.settings.newValue && changes.settings.newValue.theme;
-      if (t && t !== currentTheme) applyTheme(t);
+      const next = changes.settings.newValue || {};
+      if (next.theme && next.theme !== currentTheme) applyTheme(next.theme);
+      if (next.answerStyle && next.answerStyle !== currentAnswerStyle) applyAnswerStyle(next.answerStyle);
     }
   });
 }
 
 // Handle hotkey (Alt+Shift+A — Option key on Mac, Alt+Shift+K for Welcome Bubble)
 function handleHotkey(event) {
-  // Don't trigger if user is typing in an input field
   const activeElement = document.activeElement;
+
+  // Escape closes the overlay when it (or one of its inputs) holds focus — works
+  // even while typing, but won't hijack Escape elsewhere on the page.
+  if (event.key === 'Escape' && overlayWindow && !overlayWindow.classList.contains('hidden')
+      && overlayWindow.contains(activeElement)) {
+    event.preventDefault();
+    overlayWindow.classList.add('hidden');
+    saveWindowState();
+    return;
+  }
+
+  // Don't trigger the analyze/welcome hotkeys while typing in an input field.
   if (activeElement && (
     activeElement.tagName === 'INPUT' ||
     activeElement.tagName === 'TEXTAREA' ||
@@ -266,31 +306,8 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
   
   // Clear response area and show initial state
   if (currentThread && currentThread.messages.length >= 2) {
-    // Show conversation thread so far
-    let threadHTML = '<div class="cps-conversation-thread">';
-    currentThread.messages.slice(0, -1).forEach((msg) => {
-      if (msg.role === 'user') {
-        threadHTML += `
-          <div class="cps-message cps-user-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      } else if (msg.role === 'assistant') {
-        threadHTML += `
-          <div class="cps-message cps-assistant-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      }
-    });
-    // Add streaming message placeholder
-    threadHTML += `
-      <div class="cps-message cps-assistant-message cps-streaming">
-        <div class="cps-message-content" id="streaming-content"></div>
-      </div>
-    `;
-    threadHTML += '</div>';
-    responseArea.innerHTML = threadHTML;
+    // Show conversation thread so far, with a placeholder for the streaming reply.
+    responseArea.innerHTML = renderThread(currentThread.messages.slice(0, -1), { streamingPlaceholder: true });
     // Render code/math in the already-complete prior messages.
     enhanceElement(responseArea);
   } else {
@@ -303,6 +320,10 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
   // the final render swaps in formatted markdown and resets this.
   if (streamingContent) streamingContent.style.whiteSpace = 'pre-wrap';
 
+  // Throttle state for incremental markdown rendering during streaming.
+  let lastRenderAt = 0;
+  let renderedOnce = false;
+
   // Set up message listener for streaming
   const messageListener = (request, sender, sendResponse) => {
     // Ignore anything belonging to a different (e.g. superseded) request.
@@ -310,9 +331,20 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
     if (request.action === 'streamChunk') {
       streamedResponse += request.chunk;
       if (streamingContent) {
-        // Append just the new delta (O(1)); textContent can't inject markup, so
-        // raw partial text is safe to show until the final markdown render.
-        streamingContent.textContent += request.chunk;
+        const nowTs = Date.now();
+        // Re-render markdown at most ~4×/sec, and only when not mid-formula or
+        // mid-code-fence (rendering an unclosed $$ or ``` would garble output).
+        if (nowTs - lastRenderAt > 250 && streamRenderSafe(streamedResponse)) {
+          lastRenderAt = nowTs;
+          renderedOnce = true;
+          streamingContent.style.whiteSpace = '';
+          streamingContent.innerHTML = formatResponse(streamedResponse);
+          enhanceElement(streamingContent);
+        } else if (!renderedOnce) {
+          // Before the first render, show accurate raw text so output appears live.
+          streamingContent.style.whiteSpace = 'pre-wrap';
+          streamingContent.textContent = streamedResponse;
+        }
         // Auto-scroll to bottom
         responseArea.scrollTop = responseArea.scrollHeight;
       }
@@ -324,7 +356,6 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
       }
       
       const finalResponse = request.fullResponse || streamedResponse;
-      const confidence = request.confidence || 70;
       const responseTime = request.responseTime || 0;
       lastResponseText = finalResponse; // raw text for Copy
 
@@ -347,7 +378,6 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
           currentThread.messages.push({
             role: 'assistant',
             text: finalResponse,
-            confidence: confidence,
             timestamp: Date.now()
           });
         }
@@ -357,13 +387,15 @@ function sendAnalysisRequest(text, imageData = null, isFollowUp = false) {
           addToHistory({
             text,
             response: finalResponse,
-            confidence: confidence,
             timestamp: Date.now(),
             threadId: currentThread?.id
           });
         } else {
           updateHistoryThread(currentThread);
         }
+
+        // Surface a spend warning if the user is over their monthly budget.
+        maybeShowBudgetNotice();
       }
 
       // Clear follow-up input
@@ -469,6 +501,10 @@ function analysisShellHTML() {
         <span class="cps-version"></span>
       </div>
       <div class="cps-controls">
+        <select class="cps-style-select" title="Answer style">
+          <option value="answer">Just the answer</option>
+          <option value="explain">Concept explainer</option>
+        </select>
         <button class="cps-btn cps-theme-toggle" title="Toggle theme">☀️</button>
         <button class="cps-btn cps-minimize" title="Minimize">−</button>
         <button class="cps-btn cps-close" title="Close">×</button>
@@ -504,6 +540,10 @@ function analysisShellHTML() {
         </div>
       </div>
       <div class="cps-tab-content" data-content="history">
+        <div class="cps-history-controls">
+          <input type="text" class="cps-history-search" placeholder="Search history…" />
+          <button class="cps-history-export" title="Export history as JSON">⬇ Export</button>
+        </div>
         <div class="cps-history-list"></div>
       </div>
     </div>
@@ -524,6 +564,37 @@ function wireAnalysisShell() {
   setupFeedback();
   setupFollowUp();
   setupActions();
+  setupHistoryControls();
+}
+
+// Latest history list, cached so the search box can filter without re-reading
+// storage on every keystroke.
+let conversationHistoryCache = [];
+
+// Wire the history search box and export button (once per shell render).
+function setupHistoryControls() {
+  const search = overlayWindow.querySelector('.cps-history-search');
+  if (search) {
+    search.addEventListener('input', () => renderHistoryList());
+  }
+  const exportBtn = overlayWindow.querySelector('.cps-history-export');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => exportHistory());
+  }
+}
+
+// Download the full conversation history as JSON.
+function exportHistory() {
+  chrome.storage.local.get(['conversationHistory'], (result) => {
+    const history = result.conversationHistory || [];
+    const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-problem-solver-history-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
 }
 
 // Create overlay window
@@ -562,6 +633,16 @@ function setupWindowControls() {
     });
   }
   updateThemeButton();
+
+  // Answer-style selector (analysis shell only): reflect current value and persist on change.
+  const styleSelect = overlayWindow.querySelector('.cps-style-select');
+  if (styleSelect) {
+    styleSelect.value = currentAnswerStyle;
+    styleSelect.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setAnswerStyle(styleSelect.value);
+    });
+  }
 
   const minimizeBtn = overlayWindow.querySelector('.cps-minimize');
   const closeBtn = overlayWindow.querySelector('.cps-close');
@@ -719,11 +800,16 @@ function setupFollowUp() {
     updateWordCount();
   });
   
-  // Send on Enter (but allow Shift+Enter for new line)
+  // Send on Enter (Shift+Enter = newline); ↑ on an empty input recalls the last
+  // sent follow-up so it can be edited and re-sent.
   followUpInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendFollowUp();
+    } else if (e.key === 'ArrowUp' && !followUpInput.value && lastFollowUpText) {
+      e.preventDefault();
+      followUpInput.value = lastFollowUpText;
+      updateWordCount();
     }
   });
   
@@ -859,9 +945,12 @@ function sendFollowUp() {
     return;
   }
   
+  // Remember it for ↑ recall, then send.
+  lastFollowUpText = text;
+
   // Display loading
   displayLoading();
-  
+
   // Send follow-up request
   sendAnalysisRequest(text, null, true);
 }
@@ -961,31 +1050,12 @@ function displayLoading() {
 }
 
 // Display response
-function displayResponse(response, confidence, responseTime, isFollowUp = false) {
+function displayResponse(response, responseTime, isFollowUp = false) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
-  
+
   // Display full conversation thread if we have multiple messages
   if (currentThread && currentThread.messages.length >= 2) {
-    let threadHTML = '<div class="cps-conversation-thread">';
-    
-    currentThread.messages.forEach((msg, index) => {
-      if (msg.role === 'user') {
-        threadHTML += `
-          <div class="cps-message cps-user-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      } else if (msg.role === 'assistant') {
-        threadHTML += `
-          <div class="cps-message cps-assistant-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      }
-    });
-    
-    threadHTML += '</div>';
-    responseArea.innerHTML = threadHTML;
+    responseArea.innerHTML = renderThread(currentThread.messages);
   } else {
     // Display single response
     responseArea.innerHTML = `<div class="cps-response">${formatResponse(response)}</div>`;
@@ -997,7 +1067,6 @@ function displayResponse(response, confidence, responseTime, isFollowUp = false)
   // Store current conversation
   currentConversation = {
     response,
-    confidence,
     responseTime,
     timestamp: Date.now()
   };
@@ -1095,10 +1164,93 @@ function enhanceElement(el) {
   }
 }
 
-// Display error
+// One conversation message → HTML. Shared by every thread-render site.
+function messageBlockHTML(msg) {
+  const cls = msg.role === 'user' ? 'cps-user-message' : 'cps-assistant-message';
+  return `
+    <div class="cps-message ${cls}">
+      <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
+    </div>
+  `;
+}
+
+// Render a list of user/assistant messages as a conversation thread. With
+// streamingPlaceholder, append an empty assistant bubble (#streaming-content)
+// for the in-flight answer. Single source of truth for thread markup.
+function renderThread(messages, { streamingPlaceholder = false } = {}) {
+  let html = '<div class="cps-conversation-thread">';
+  (messages || []).forEach((msg) => {
+    if (msg.role === 'user' || msg.role === 'assistant') html += messageBlockHTML(msg);
+  });
+  if (streamingPlaceholder) {
+    html += `
+      <div class="cps-message cps-assistant-message cps-streaming">
+        <div class="cps-message-content" id="streaming-content"></div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  return html;
+}
+
+// True when partial streamed markdown can be rendered without garbling — i.e.
+// no unclosed code fence (```) or display-math ($$) span.
+function streamRenderSafe(text) {
+  const fences = (text.match(/```/g) || []).length;
+  const dd = (text.match(/\$\$/g) || []).length;
+  return fences % 2 === 0 && dd % 2 === 0;
+}
+
+// If the user set a monthly budget and this month's spend exceeds it, prepend a
+// one-line notice to the answer. Reads the same usage history analytics uses.
+function maybeShowBudgetNotice() {
+  chrome.storage.sync.get(['settings'], (s) => {
+    const budget = Number(s.settings && s.settings.monthlyBudgetUsd) || 0;
+    if (budget <= 0) return;
+    chrome.storage.local.get(['usage'], (u) => {
+      const history = (u.usage && u.usage.history) || [];
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      let monthCost = 0;
+      history.forEach((it) => { if (it.timestamp >= monthStart) monthCost += Number(it.costUsd) || 0; });
+      if (monthCost <= budget) return;
+
+      const responseArea = overlayWindow && overlayWindow.querySelector('.cps-response-area');
+      if (!responseArea || responseArea.querySelector('.cps-budget-notice')) return;
+      const notice = document.createElement('div');
+      notice.className = 'cps-budget-notice';
+      notice.textContent = `⚠ Over monthly budget: $${monthCost.toFixed(2)} of $${budget}.`;
+      responseArea.prepend(notice);
+    });
+  });
+}
+
+// Map a raw API error message to a friendlier, actionable line.
+function friendlyError(error) {
+  const msg = String(error || '');
+  if (/api key not configured|401|authentication/i.test(msg)) {
+    return 'No valid Claude API key. Open Settings and add your Anthropic key.';
+  }
+  if (/429|rate.?limit/i.test(msg)) {
+    return 'Rate limited by the Claude API. Wait a moment, then retry.';
+  }
+  if (/network|failed to fetch|connection/i.test(msg)) {
+    return 'Network error reaching the Claude API. Check your connection and retry.';
+  }
+  return msg || 'Something went wrong.';
+}
+
+// Display error as a friendly card with an inline Retry.
 function displayError(error) {
   const responseArea = overlayWindow.querySelector('.cps-response-area');
-  responseArea.innerHTML = `<div class="cps-error">Error: ${escapeHtml(error)}</div>`;
+  responseArea.innerHTML = `
+    <div class="cps-error">
+      <div class="cps-error-text">${escapeHtml(friendlyError(error))}</div>
+      <button class="cps-action-btn cps-error-retry">🔄 Retry</button>
+    </div>
+  `;
+  const retry = responseArea.querySelector('.cps-error-retry');
+  if (retry) retry.addEventListener('click', () => regenerate());
 }
 
 // Display message
@@ -1137,35 +1289,51 @@ function updateHistoryThread(thread) {
   });
 }
 
-// Load history
+// Load history into the cache, then render (honoring any active search filter).
 function loadHistory() {
   chrome.storage.local.get(['conversationHistory'], (result) => {
-    const history = result.conversationHistory || [];
-    const historyList = overlayWindow.querySelector('.cps-history-list');
-    
-    if (history.length === 0) {
-      historyList.innerHTML = '<div class="cps-empty">No conversation history</div>';
-      return;
-    }
-    
-    historyList.innerHTML = history.map((item, index) => {
-      const date = new Date(item.timestamp);
-      return `
-        <div class="cps-history-item" data-index="${index}">
-          <div class="cps-history-header">
-            <span class="cps-history-time">${date.toLocaleString()}</span>
-          </div>
-          <div class="cps-history-text">${escapeHtml(item.text.substring(0, 100))}${item.text.length > 100 ? '...' : ''}</div>
+    conversationHistoryCache = result.conversationHistory || [];
+    renderHistoryList();
+  });
+}
+
+// Render the history list from the cache, filtered by the search box. Items keep
+// their original cache index in data-index so clicks resolve the right entry.
+function renderHistoryList() {
+  const historyList = overlayWindow.querySelector('.cps-history-list');
+  if (!historyList) return;
+
+  const term = (overlayWindow.querySelector('.cps-history-search')?.value || '').trim().toLowerCase();
+  const items = conversationHistoryCache
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !term || (item.text || '').toLowerCase().includes(term));
+
+  if (conversationHistoryCache.length === 0) {
+    historyList.innerHTML = '<div class="cps-empty">No conversation history</div>';
+    return;
+  }
+  if (items.length === 0) {
+    historyList.innerHTML = '<div class="cps-empty">No matches</div>';
+    return;
+  }
+
+  historyList.innerHTML = items.map(({ item, index }) => {
+    const date = new Date(item.timestamp);
+    const text = item.text || '';
+    return `
+      <div class="cps-history-item" data-index="${index}">
+        <div class="cps-history-header">
+          <span class="cps-history-time">${date.toLocaleString()}</span>
         </div>
-      `;
-    }).join('');
-    
-    // Add click handlers
-    historyList.querySelectorAll('.cps-history-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const index = parseInt(item.dataset.index);
-        displayHistoryItem(history[index]);
-      });
+        <div class="cps-history-text">${escapeHtml(text.substring(0, 100))}${text.length > 100 ? '...' : ''}</div>
+      </div>
+    `;
+  }).join('');
+
+  historyList.querySelectorAll('.cps-history-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const index = parseInt(el.dataset.index);
+      displayHistoryItem(conversationHistoryCache[index]);
     });
   });
 }
@@ -1175,33 +1343,13 @@ function displayHistoryItem(item) {
   // Restore thread if available
   if (item.thread) {
     currentThread = item.thread;
-    // Display full thread
     const responseArea = overlayWindow.querySelector('.cps-response-area');
-    let threadHTML = '<div class="cps-conversation-thread">';
-    
-    currentThread.messages.forEach((msg) => {
-      if (msg.role === 'user') {
-        threadHTML += `
-          <div class="cps-message cps-user-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      } else if (msg.role === 'assistant') {
-        threadHTML += `
-          <div class="cps-message cps-assistant-message">
-            <div class="cps-message-content">${formatResponse(msg.text || '')}</div>
-          </div>
-        `;
-      }
-    });
-    
-    threadHTML += '</div>';
-    responseArea.innerHTML = threadHTML;
+    responseArea.innerHTML = renderThread(currentThread.messages);
     enhanceElement(responseArea);
   } else {
-    displayResponse(item.response, item.confidence, item.responseTime);
+    displayResponse(item.response, item.responseTime);
   }
-  
+
   overlayWindow.querySelector('[data-tab="main"]').click();
 }
 

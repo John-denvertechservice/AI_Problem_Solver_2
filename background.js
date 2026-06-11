@@ -3,31 +3,24 @@
 // Only the streaming path is used by the UI; chunks/final/error are pushed to
 // the originating tab via chrome.tabs.sendMessage.
 
-// Default settings
+// The single model this extension uses. Haiku is fast, cheap, and more than
+// capable for the math / language / multiple-choice problems this tool targets.
+// (Display name lives in options.js and analytics.js — keep them in sync.)
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+
+// Default settings. answerStyle: 'answer' (just the answer) | 'explain'
+// (concept explainer). monthlyBudgetUsd: 0 means no cap.
 const DEFAULT_SETTINGS = {
-  provider: 'openai',
-  model: 'gpt-4.1-mini',
-  openaiKey: '',
-  claudeKey: ''
+  claudeKey: '',
+  theme: 'dark',
+  trackUsage: true,
+  answerStyle: 'answer',
+  monthlyBudgetUsd: 0
 };
 
 // Max output tokens per request. Streaming keeps long answers from hitting SDK
 // timeouts, so this can be generous without risking truncated replies.
 const MAX_TOKENS = 4096;
-
-// OpenAI Models
-const OPENAI_MODELS = {
-  'gpt-4.1-nano': { name: 'GPT-4.1 Nano', vision: true },
-  'gpt-4.1-mini': { name: 'GPT-4.1 Mini', vision: true },
-  'gpt-4.1': { name: 'GPT-4.1', vision: true }
-};
-
-// Claude Models
-const CLAUDE_MODELS = {
-  'claude-haiku-4-5-20251001': { name: 'Claude Haiku 4.5', vision: true },
-  'claude-sonnet-4-6': { name: 'Claude Sonnet 4.6', vision: true },
-  'claude-opus-4-8': { name: 'Claude Opus 4.8', vision: true }
-};
 
 // In-flight streaming requests, keyed by requestId, so a Stop button in the
 // overlay can abort the right fetch without touching any other request.
@@ -102,12 +95,14 @@ function analyzeContentType(text) {
   ];
   const isMath = mathPatterns.some(pattern => pattern.test(text));
 
-  // Code detection
-  const codePatterns = [
-    /function\s+\w+|def\s+\w+|class\s+\w+|import\s+|const\s+\w+|let\s+\w+|var\s+\w+/,
-    /[{}();]|=>|->|::/
+  // Multiple-choice detection: lettered/numbered options (A) B. (c) etc.) or an
+  // explicit "which of the following" prompt — the core of a study tool.
+  const mcPatterns = [
+    /(^|\n)\s*\(?[A-Da-d][).]\s+\S/,           // A) ...  B. ...  (c) ...
+    /(^|\n)\s*[1-5][).]\s+\S/,                  // 1) ...  2. ...
+    /which of the following|choose the (correct|best)|select the (correct|best)/i
   ];
-  const isCode = codePatterns.some(pattern => pattern.test(text));
+  const isMultipleChoice = mcPatterns.some(pattern => pattern.test(text));
 
   // Question detection
   const isQuestion = trimmed.endsWith('?') || /^(what|how|why|when|where|who|which|can|could|should|would|is|are|do|does|did)/i.test(trimmed);
@@ -119,12 +114,12 @@ function analyzeContentType(text) {
   const isCommand = /^(answer|calculate|evaluate|graph|select|solve|find)/i.test(trimmed);
 
   // Matter-of-fact statement
-  const isStatement = !isQuestion && !isMath && !isCode && !isCommand && wordCount <= 20;
+  const isStatement = !isQuestion && !isMath && !isMultipleChoice && !isCommand && wordCount <= 20;
 
   return {
     wordCount,
     isMath,
-    isCode,
+    isMultipleChoice,
     isQuestion,
     isFillBlank,
     isCommand,
@@ -133,27 +128,40 @@ function analyzeContentType(text) {
   };
 }
 
-// Build prompt based on content type
-function buildPrompt(text, contentType, isImage = false) {
-  const { isMath, isCode, isQuestion, isFillBlank, isCommand, isStatement, isLongText } = contentType;
+// Per-answer-style directive appended to the system prompt. 'answer' is terse
+// (great for multiple-choice / fill-in-the-blank); 'explain' teaches the concept.
+function answerStyleDirective(answerStyle) {
+  if (answerStyle === 'explain') {
+    return 'Answer style: explain the underlying concept needed to reach the answer, then state the answer. ' +
+      'Keep it study-oriented and clear, not exhaustive. ';
+  }
+  return 'Answer style: give the answer directly and concisely. State the Final Answer first; ' +
+    'add at most a one-line justification. Avoid long explanations. ';
+}
 
-  let systemPrompt = 'You are a helpful AI assistant that provides accurate, concise answers. ' +
-    'Format replies in Markdown: use headings, bullet/numbered lists, tables, and fenced code blocks ' +
-    'with a language tag (e.g. ```python). Write math in LaTeX — inline as \\( ... \\) and display ' +
-    'equations as $$ ... $$. ';
+// Build prompt based on content type. This is a study/subject assistant
+// (math, language, multiple-choice, fill-in-the-blank, word problems) — not a
+// coding tool — so prompts lean on stating a clear Final Answer.
+function buildPrompt(text, contentType, isImage = false, answerStyle = 'answer') {
+  const { isMath, isMultipleChoice, isQuestion, isFillBlank, isCommand, isStatement, isLongText } = contentType;
+
+  let systemPrompt = 'You are a helpful study assistant that solves academic problems across subjects ' +
+    '(math, language, science, history, and general knowledge) with accurate, concise answers. ' +
+    'Format replies in Markdown: use headings, bullet/numbered lists, and tables. Write math in LaTeX — ' +
+    'inline as \\( ... \\) and display equations as $$ ... $$. ';
   let userPrompt = '';
 
   if (isImage) {
-    systemPrompt += 'Analyze the image and provide a detailed description. ';
-    if (isMath || isCode) {
-      systemPrompt += 'If the image contains math or code, solve or explain it step-by-step. ';
+    systemPrompt += 'Read the problem in the image and solve it. Provide a clear Final Answer. ';
+    if (isMath) {
+      systemPrompt += 'If it contains math, solve it step-by-step. ';
     }
   } else if (isMath) {
     systemPrompt += 'You are solving a mathematical problem. Restate the problem clearly, solve it step-by-step showing all work, and provide a Final Answer at the end. ';
     userPrompt = `Solve this math problem step-by-step:\n\n${text}`;
-  } else if (isCode) {
-    systemPrompt += 'Identify the programming language, summarize the functionality, and offer clarification or improvements. Do NOT include a Final Answer field. ';
-    userPrompt = `Analyze this code:\n\n${text}`;
+  } else if (isMultipleChoice) {
+    systemPrompt += 'This is a multiple-choice question. Identify the single best option, state it as the Final Answer (the letter/number and its text), and briefly say why. ';
+    userPrompt = `Answer this multiple-choice question:\n\n${text}`;
   } else if (isFillBlank) {
     systemPrompt += 'Provide the most likely answer for this fill-in-the-blank question. Include a Final Answer field. ';
     userPrompt = `Fill in the blank:\n\n${text}`;
@@ -161,8 +169,8 @@ function buildPrompt(text, contentType, isImage = false) {
     systemPrompt += 'Provide a brief, accurate answer to this question. Include a Final Answer field. ';
     userPrompt = `Answer this question:\n\n${text}`;
   } else if (isCommand) {
-    systemPrompt += 'Execute this command and return the result. Include a Final Answer field. For graphs, use ASCII art. ';
-    userPrompt = `Execute:\n\n${text}`;
+    systemPrompt += 'Carry out this instruction and return the result. Include a Final Answer field. For graphs, use ASCII art. ';
+    userPrompt = `Do this:\n\n${text}`;
   } else if (isLongText) {
     systemPrompt += 'Summarize the key points of this text, then ask how the user would like to proceed with helpful suggestions. Do NOT include a Final Answer field. ';
     userPrompt = `Summarize this text:\n\n${text}`;
@@ -172,6 +180,11 @@ function buildPrompt(text, contentType, isImage = false) {
   } else {
     systemPrompt += 'Provide helpful analysis and insights. ';
     userPrompt = text;
+  }
+
+  // Style applies to answer-bearing content types, not summaries/clarifications.
+  if (isMath || isMultipleChoice || isFillBlank || isQuestion || isCommand || isImage) {
+    systemPrompt += answerStyleDirective(answerStyle);
   }
 
   return { systemPrompt, userPrompt };
@@ -190,31 +203,6 @@ function parseImageSource(imageData) {
     return { type: 'base64', media_type: match[1], data: match[2] };
   }
   return { type: 'base64', media_type: 'image/png', data: (imageData || '').split(',')[1] || imageData };
-}
-
-// Build the OpenAI chat messages array (system + history + current turn).
-function buildOpenAIMessages(systemPrompt, userPrompt, text, imageData, conversationContext) {
-  const messages = [{ role: 'system', content: systemPrompt }];
-
-  (conversationContext || []).forEach(msg => {
-    if (msg.role === 'user') {
-      messages.push({
-        role: 'user',
-        content: msg.imageData
-          ? [{ type: 'text', text: msg.text }, { type: 'image_url', image_url: { url: msg.imageData } }]
-          : msg.text
-      });
-    } else if (msg.role === 'assistant') {
-      messages.push({ role: 'assistant', content: msg.text });
-    }
-  });
-
-  const content = [];
-  if (userPrompt) content.push({ type: 'text', text: userPrompt });
-  if (imageData) content.push({ type: 'image_url', image_url: { url: imageData } });
-  messages.push({ role: 'user', content: content.length ? content : (userPrompt || text) });
-
-  return messages;
 }
 
 // Build the Claude messages array (history + current turn). The system prompt
@@ -317,43 +305,14 @@ async function streamCompletion({ url, headers, body, tabId, requestId, extractD
   return fullResponse;
 }
 
-// Call OpenAI with streaming
-async function callOpenAIStream(text, contentType, imageData, conversationContext, tabId, requestId) {
-  const settings = await getSettings();
-  const apiKey = settings.openaiKey;
-  if (!apiKey) throw new Error('OpenAI API key not configured');
-
-  const model = settings.model || 'gpt-4.1-mini';
-  const { systemPrompt, userPrompt } = buildPrompt(text, contentType, !!imageData);
-
-  return streamCompletion({
-    url: 'https://api.openai.com/v1/chat/completions',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: {
-      model,
-      messages: buildOpenAIMessages(systemPrompt, userPrompt, text, imageData, conversationContext),
-      temperature: getTemperature(contentType),
-      max_tokens: MAX_TOKENS,
-      stream: true
-    },
-    tabId,
-    requestId,
-    errorLabel: 'OpenAI API error',
-    extractDelta: (json) => ({ delta: json.choices?.[0]?.delta?.content || '' })
-  });
-}
-
-// Call Claude with streaming
-async function callClaudeStream(text, contentType, imageData, conversationContext, tabId, requestId) {
+// Call Claude with streaming. Returns the accumulated text plus the token usage
+// reported by the API (used for cost tracking). Haiku is the only model.
+async function callClaudeStream(text, contentType, imageData, conversationContext, tabId, requestId, usage) {
   const settings = await getSettings();
   const apiKey = settings.claudeKey;
   if (!apiKey) throw new Error('Claude API key not configured');
 
-  const model = settings.model || 'claude-sonnet-4-6';
-  const { systemPrompt, userPrompt } = buildPrompt(text, contentType, !!imageData);
+  const { systemPrompt, userPrompt } = buildPrompt(text, contentType, !!imageData, settings.answerStyle);
 
   return streamCompletion({
     url: 'https://api.anthropic.com/v1/messages',
@@ -364,7 +323,7 @@ async function callClaudeStream(text, contentType, imageData, conversationContex
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: {
-      model,
+      model: CLAUDE_MODEL,
       system: systemPrompt,
       messages: buildClaudeMessages(userPrompt, text, imageData, conversationContext),
       temperature: getTemperature(contentType),
@@ -375,6 +334,15 @@ async function callClaudeStream(text, contentType, imageData, conversationContex
     requestId,
     errorLabel: 'Claude API error',
     extractDelta: (json) => {
+      // Capture token usage as it streams: message_start carries input_tokens,
+      // message_delta carries the running output_tokens.
+      if (json.type === 'message_start' && json.message?.usage) {
+        usage.inputTokens = json.message.usage.input_tokens || 0;
+        usage.outputTokens = json.message.usage.output_tokens || 0;
+      }
+      if (json.type === 'message_delta' && json.usage && json.usage.output_tokens != null) {
+        usage.outputTokens = json.usage.output_tokens;
+      }
       if (json.type === 'content_block_delta' && json.delta?.text) return { delta: json.delta.text };
       if (json.type === 'message_stop') return { stop: true };
       return {};
@@ -385,48 +353,58 @@ async function callClaudeStream(text, contentType, imageData, conversationContex
 // Content type used for follow-up turns (skip classification, treat as a question).
 function followUpContentType(text) {
   return {
-    isMath: false, isCode: false, isQuestion: true, isFillBlank: false,
+    isMath: false, isMultipleChoice: false, isQuestion: true, isFillBlank: false,
     isCommand: false, isStatement: false, isLongText: false,
     wordCount: (text || '').split(/\s+/).length
   };
 }
 
+// Label the primary content type for usage stats.
+function contentTypeLabel(contentType) {
+  if (contentType.isMath) return 'math';
+  if (contentType.isMultipleChoice) return 'multipleChoice';
+  if (contentType.isFillBlank) return 'fillBlank';
+  if (contentType.isQuestion) return 'question';
+  if (contentType.isCommand) return 'command';
+  if (contentType.isLongText) return 'longText';
+  return 'text';
+}
+
 // Handle streaming analysis request
 async function handleAnalysisStream(data, tabId) {
-  const settings = await getSettings();
   try {
     const startTime = Date.now();
     const { text, imageData, conversationContext, isFollowUp, requestId } = data;
 
     const contentType = isFollowUp ? followUpContentType(text) : analyzeContentType(text || '');
 
-    const callStream = settings.provider === 'openai' ? callOpenAIStream : callClaudeStream;
-    const fullResponse = await callStream(text, contentType, imageData, conversationContext, tabId, requestId);
+    const usage = { inputTokens: 0, outputTokens: 0 };
+    const fullResponse = await callClaudeStream(
+      text, contentType, imageData, conversationContext, tabId, requestId, usage
+    );
 
     const responseTime = Date.now() - startTime;
-    const confidence = calculateConfidence(fullResponse, contentType);
+    const costUsd = estimateCost(usage.inputTokens, usage.outputTokens);
 
     trackUsage({
-      provider: settings.provider,
-      model: settings.model,
+      model: CLAUDE_MODEL,
       responseTime,
       success: true,
-      contentType: contentType.isMath ? 'math' : contentType.isCode ? 'code' : 'text'
+      contentType: contentTypeLabel(contentType),
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd
     });
 
-    // Single completion signal — carries the real confidence (fixes the prior
-    // bug where an earlier streamComplete pinned confidence at the 70% default).
     chrome.tabs.sendMessage(tabId, {
       action: 'streamFinal',
-      confidence,
       responseTime,
       fullResponse,
       requestId
     });
   } catch (error) {
     trackUsage({
-      provider: settings.provider,
-      model: settings.model,
+      model: CLAUDE_MODEL,
       success: false,
       error: error.message
     });
@@ -439,29 +417,30 @@ async function handleAnalysisStream(data, tabId) {
   }
 }
 
-// Calculate confidence score (0-100). Heuristic based on response shape — not a
-// model-reported probability.
-function calculateConfidence(response, contentType) {
-  let confidence = 70; // Base confidence
+// Claude Haiku 4.5 pricing (USD per million tokens). Verified against
+// Anthropic's pricing page — update if the rates change.
+const HAIKU_PRICE_PER_MTOK = { input: 1.0, output: 5.0 };
 
-  if (contentType.isMath && /final answer|answer:\s*\d+/i.test(response)) {
-    confidence = 90;
-  }
-  if (contentType.isCode && response.length > 100) {
-    confidence = 85;
-  }
-  if (contentType.isLongText && response.length < 50) {
-    confidence = 60;
-  }
-
-  return Math.max(50, Math.min(95, confidence));
+// Estimate request cost in USD from token counts.
+function estimateCost(inputTokens, outputTokens) {
+  const input = (inputTokens || 0) / 1e6 * HAIKU_PRICE_PER_MTOK.input;
+  const output = (outputTokens || 0) / 1e6 * HAIKU_PRICE_PER_MTOK.output;
+  return input + output;
 }
 
-// Get settings from storage
+// Get settings from storage, normalizing any legacy shape (pre-v2 settings had
+// provider/model/openaiKey) onto the current defaults so old installs keep working.
 function getSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(['settings'], (result) => {
-      resolve(result.settings || DEFAULT_SETTINGS);
+      const saved = result.settings || {};
+      resolve({
+        claudeKey: saved.claudeKey || '',
+        theme: saved.theme === 'light' ? 'light' : 'dark',
+        trackUsage: saved.trackUsage !== false,
+        answerStyle: saved.answerStyle === 'explain' ? 'explain' : 'answer',
+        monthlyBudgetUsd: Number(saved.monthlyBudgetUsd) || 0
+      });
     });
   });
 }
@@ -475,7 +454,6 @@ function trackUsage(data) {
       failedRequests: 0,
       totalResponseTime: 0,
       averageResponseTime: 0,
-      byProvider: {},
       byModel: {},
       byContentType: {},
       history: []
@@ -492,9 +470,6 @@ function trackUsage(data) {
       usage.failedRequests++;
     }
 
-    if (data.provider) {
-      usage.byProvider[data.provider] = (usage.byProvider[data.provider] || 0) + 1;
-    }
     if (data.model) {
       usage.byModel[data.model] = (usage.byModel[data.model] || 0) + 1;
     }

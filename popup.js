@@ -28,10 +28,9 @@ function checkStatus() {
     const statusDot = statusIndicator.querySelector('.status-dot');
     const statusText = statusIndicator.querySelector('.status-text');
     
-    const requiredKey = settings.provider === 'openai' ? 'openaiKey' : 'claudeKey';
-    const hasKey = settings[requiredKey] && settings[requiredKey].length > 0;
-    
-    if (hasKey && settings.model) {
+    const hasKey = settings.claudeKey && settings.claudeKey.length > 0;
+
+    if (hasKey) {
       statusDot.classList.add('active');
       statusText.textContent = 'Ready';
     } else {

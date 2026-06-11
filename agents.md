@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**AI Problem Solver** is an AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. The extension leverages the OpenAI and Anthropic Claude APIs to deliver contextually aware, well-formatted responses.
+**AI Problem Solver** is an AI-powered Chrome extension that helps solve academic/subject problems — math, language, multiple-choice, fill-in-the-blank, and word problems across subjects. It is **not** a coding tool. A single model, **Claude Haiku 4.5** (Anthropic API), delivers contextually aware, well-formatted responses; there is no provider or model selection.
 
 > **This is the comprehensive reference.** For a quick start — how to load and test the unpacked extension, the `content.js` → `background.js` → API message flow, and the core code-level constraints — see **[CLAUDE.md](CLAUDE.md)**. This guide goes deeper on features, the decision tree, API integration, storage, and collaboration; CLAUDE.md is the fast orientation.
 
@@ -19,7 +19,7 @@
 2. **Formatting & Presentation**
    - Answers appear concise and well-formatted
    - No markup or error message bleedthroughs
-   - Confidence indicator is graphically appealing and powerful
+   - Answer-style presets (just-the-answer / concept-explainer)
    - Clean, professional presentation
 
 3. **Performance**
@@ -67,7 +67,7 @@ Chrome_Problem_Solver2/
 ├── popup.js               # Popup functionality
 ├── popup.css              # Popup styling
 ├── options.html           # Settings page
-├── options.js             # Settings functionality (provider/model/key management)
+├── options.js             # Settings: Claude key, theme, answer style, monthly budget
 ├── options.css            # Settings page styling
 ├── analytics.html         # Usage analytics dashboard
 ├── analytics.js           # Analytics dashboard logic (reads chrome.storage.local usage data)
@@ -82,10 +82,8 @@ Chrome_Problem_Solver2/
 ### Technical Stack
 
 - **Manifest Version**: V3 (Modern Chrome extension architecture)
-- **AI Providers**: 
-  - OpenAI API (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano)
-  - Claude API (Claude Opus 4.8, Claude Sonnet 4.6, Claude Haiku 4.5)
-- **Storage**: Chrome sync storage for API keys and settings
+- **AI Model**: Claude API — **Claude Haiku 4.5** only (`claude-haiku-4-5-20251001`)
+- **Storage**: Chrome sync storage for the API key and settings; local storage for usage/history
 - **Architecture**: Content scripts + Background service worker
 
 ### Key Features
@@ -111,11 +109,11 @@ Chrome_Problem_Solver2/
    - Statistics and probability
    - Step-by-step solutions with verification
 
-4. **Coding Problem Solving**
-   - Code analysis and explanation
-   - Language identification
-   - Functionality summarization
-   - Code improvement suggestions
+4. **Multiple-Choice & Subject Q&A**
+   - Multiple-choice questions (A/B/C/D, "which of the following")
+   - Fill-in-the-blank
+   - Language, science, history, and general-knowledge questions
+   - Selects the single best option and states it as the Final Answer
 
 ## Decision Tree Behavior
 
@@ -125,11 +123,13 @@ The extension follows a structured decision tree to ensure consistent AI respons
 
 - **Over 75 words**: Summarize key points, then ask how the user would like to proceed with helpful suggestions (no Final Answer)
 - **Fill-in-the-blank**: Return most likely answer (with Final Answer)
+- **Multiple-choice** (`A) … B) …`, "which of the following"): Identify the single best option, state it as the Final Answer with a brief why
 - **Questions**: Provide a brief answer and include a Final Answer field
 - **Math problems**: Restate clearly, solve step-by-step, and include a Final Answer field
 - **Matter-of-fact statements**: Give a ≤15-word summary and ask how the user wants to proceed (no Final Answer)
-- **Commands** (answer/calculate/evaluate/graph/select...): Execute and return result (with Final Answer; graphs as ASCII)
-- **Code**: Identify language, summarize functionality, offer clarification (no Final Answer)
+- **Commands** (answer/calculate/evaluate/graph/select...): Carry out and return result (with Final Answer; graphs as ASCII)
+
+The `answerStyle` setting (`answer` = terse, `explain` = concept-first) is appended to the system prompt for answer-bearing types.
 
 ### Image Analysis Rules
 
@@ -139,21 +139,11 @@ The extension follows a structured decision tree to ensure consistent AI respons
 ### AI Configuration
 
 - **Temperature**: `0.0` for math problems, `0.2` for everything else (`getTemperature()` in `background.js`)
-- **Token Limits**: `max_tokens: 2000` on every request
+- **Token Limits**: `max_tokens: 4096` on every request (`MAX_TOKENS` in `background.js`)
 - **Context**: Per-content-type system/user prompts built by `buildPrompt()`; follow-up turns skip content-type detection and are treated as questions
-- **Vision**: Image analysis supported on all OpenAI and Claude models (sent as `image_url` for OpenAI, base64 `image` blocks for Claude)
-- **Streaming**: Both providers support streamed responses (`callOpenAIStream` / `callClaudeStream`). Chunks are relayed to the content script via `streamChunk` → `streamComplete`/`streamFinal` messages; a non-streaming path (`callOpenAI` / `callClaude`) also exists.
+- **Vision**: Image problems sent to Claude as base64 `image` blocks (`parseImageSource()` preserves the real MIME type)
+- **Streaming**: `callClaudeStream()` streams the response; chunks are relayed to the content script via `streamChunk` → `streamFinal` (or `streamError`). Token usage is captured from the SSE `message_start` / `message_delta` events for cost tracking.
 - **Conversation context**: Prior turns are passed back to the API as `conversationContext`, enabling multi-turn follow-ups within a session.
-
-### Confidence Scoring
-
-`calculateConfidence()` in `background.js` returns a heuristic 0–100 score (clamped to 50–95), surfaced in the overlay:
-- Base score: **70**
-- Math answer with a clear "Final Answer"/numeric result: **90**
-- Substantial code analysis (response > 100 chars): **85**
-- Very short response to long-text input: **60**
-
-> This is a heuristic based on response shape, **not** a model-reported probability. Don't describe it as the model's actual certainty.
 
 ## User Interface
 
@@ -173,10 +163,10 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 - Opens automatically on text/image selection with hotkey
 
 ### Settings Page
-- Provider selection (OpenAI or Claude)
-- Model selection (provider-specific)
-- API key configuration
-- Theme customization
+- Claude API key configuration
+- Theme customization (dark / light)
+- Answer-style preset (just-the-answer / concept-explainer)
+- Optional monthly spend budget
 - Usage tracking and visualization
 
 ## Development Guidelines
@@ -189,10 +179,10 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 
 ### Security
 - **No external dependencies**: Self-contained extension; no third-party scripts loaded
-- **HTTPS API calls**: Requests go directly from the background service worker to `api.openai.com` and `api.anthropic.com` over TLS (`host_permissions` are scoped to just these two origins)
+- **HTTPS API calls**: Requests go directly from the background service worker to `api.anthropic.com` over TLS (`host_permissions` is scoped to just that origin)
 - **Key storage**: API keys and settings live in `chrome.storage.sync`. This keeps them on the user's machine(s) and out of any server we control, but `chrome.storage.sync` is **not encrypted at rest** — do not describe the keys as "encrypted" or "secure storage." Treat them as plaintext local data that Chrome syncs across the user's signed-in browsers.
 - **CSP compliant**: No external script loading
-- **Privacy**: No first-party data collection; only the user's selected text/image is sent to the chosen provider
+- **Privacy**: No first-party data collection; only the user's selected text/image is sent to the Claude API
 
 ### Testing
 1. Load the unpacked extension and reload after changes — see [CLAUDE.md → Loading / Testing](CLAUDE.md#loading--testing)
@@ -211,36 +201,30 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 
 ## API Integration
 
-### OpenAI API
-- **Models**: `gpt-4.1-mini` (GPT-4.1 Mini, default), `gpt-4.1-nano` (GPT-4.1 Nano), `gpt-4.1` (GPT-4.1)
-- **Vision**: All three models support image analysis
-- **Endpoint**: `POST https://api.openai.com/v1/chat/completions`, called from the background service worker
-
-### Claude API
-- **Models**: `claude-sonnet-4-6` (Claude Sonnet 4.6, default fallback), `claude-haiku-4-5-20251001` (Claude Haiku 4.5), `claude-opus-4-8` (Claude Opus 4.8)
-- **Vision**: All Claude models support image analysis
+### Claude API (the only provider)
+- **Model**: `claude-haiku-4-5-20251001` (Claude Haiku 4.5), defined once as `CLAUDE_MODEL` in `background.js`. Pricing: $1/MTok input, $5/MTok output (`HAIKU_PRICE_PER_MTOK`).
+- **Vision**: Image problems supported (base64 `image` blocks)
 - **Endpoint**: `POST https://api.anthropic.com/v1/messages`, called from the background service worker
 - **API version header**: `anthropic-version: 2023-06-01`; uses `anthropic-dangerous-direct-browser-access` for direct calls from the worker
 
-> **Note**: The extension's default provider is OpenAI with `gpt-4.1-mini`. Each provider's call site falls back to its own default model (`gpt-4.1-mini` for OpenAI, `claude-sonnet-4-6` for Claude) if none is selected. Model IDs are defined in `background.js` and `options.js` — keep both in sync when adding or changing models.
-
 ### API Key Management
-- Stored in `chrome.storage.sync` under the `settings` object (`openaiKey` / `claudeKey`)
-- User-configurable in the options page (keys are masked in the UI but stored as plaintext)
-- Not encrypted at rest; Chrome syncs them across the user's signed-in browsers
-- Never transmitted to any third party other than the provider's own API endpoint
+- Stored in `chrome.storage.sync` under the `settings` object (`claudeKey`)
+- User-configurable in the options page (key is masked in the UI but stored as plaintext)
+- Not encrypted at rest; Chrome syncs it across the user's signed-in browsers
+- Never transmitted to any third party other than the Claude API endpoint
+- `getSettings()` normalizes legacy pre-v2 settings (drops `provider`/`model`/`openaiKey`, keeps `claudeKey`)
 
 ## Data Storage
 
 ### `chrome.storage.local` (device-only, not synced)
-- Usage tracking and analytics (`usage` object: request counts, average response time, breakdowns by provider/model/content type)
+- Usage tracking and analytics (`usage` object: request counts, average response time, token counts + `costUsd`, breakdown by content type)
 - Rolling request history (last 100 entries)
+- `conversationHistory` (searchable / exportable from the overlay's History tab)
 - Feedback data from the like/dislike buttons
 - Cleared by the "Clear Data" button on the options page; exportable as JSON via "Export Data"
 
 ### `chrome.storage.sync` (synced across the user's signed-in Chrome browsers)
-- API keys (`openaiKey`, `claudeKey`) — stored as plaintext, **not encrypted**
-- Extension settings: selected `provider`, `model`, and the `trackUsage` preference
+- The `settings` object: `claudeKey` (plaintext, **not encrypted**), `theme`, `trackUsage`, `answerStyle`, `monthlyBudgetUsd`
 
 ## Collaboration Guidelines
 
@@ -264,8 +248,8 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 
 ### Common Tasks
 
-1. **Adding New AI Models**: Update model selection in options.js and add API handling in background.js
-2. **Modifying Decision Tree**: Update prompt engineering in background.js
+1. **Changing the Model**: Update `CLAUDE_MODEL` (and `HAIKU_PRICE_PER_MTOK` if pricing differs) in `background.js`; update the display label in `options`/`analytics`
+2. **Modifying Decision Tree**: Update `analyzeContentType` / `buildPrompt` in background.js
 3. **UI Changes**: Modify content.js and content.css
 4. **New Features**: Follow existing patterns and maintain consistency
 
@@ -304,7 +288,6 @@ The extension can be invoked four ways (all defined in `manifest.json` and wired
 ## Resources
 
 - **GitHub Repository**: https://github.com/John-denvertechservice/AI_analysis_chrome_extension
-- **OpenAI API**: https://platform.openai.com
 - **Claude API**: https://console.anthropic.com
 - **Chrome Extension Docs**: https://developer.chrome.com/docs/extensions/
 
@@ -314,7 +297,7 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Last Updated**: 2026-05-26 — reconciled model lists, provider naming, storage/security claims, file tree, and feature coverage with the actual code (`background.js`, `options.js`, `manifest.json`)
-**Extension Version**: 1.0.0 (see `manifest.json`)
+**Last Updated**: 2026-06-11 — v2: collapsed to Claude Haiku only, reframed as a subject solver (not coding), removed confidence, added answer-style presets, history search/export, incremental streaming, and cost/budget tracking
+**Extension Version**: 2.0.0 (see `manifest.json`)
 **Maintainer**: John-denvertechservice
 **Project Status**: Active Development

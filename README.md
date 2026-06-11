@@ -1,17 +1,17 @@
 # AI Problem Solver
 
-An AI-powered Chrome extension that provides accurate, user-friendly assistance for solving math, logic, and coding problems. Leverages OpenAI and Claude AI to deliver contextually aware, well-formatted responses with excellent performance.
+An AI-powered Chrome extension that helps you solve academic/subject problems — math, language, multiple-choice, and fill-in-the-blank — right on the page. Powered by **Claude Haiku 4.5**, it delivers fast, well-formatted answers. (It's a study/subject solver, not a coding tool.)
 
 ## Features
 
-- **AI-Powered Analysis**: Supports both OpenAI (GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano) and Claude (Opus 4.8, Sonnet 4.6, Haiku 4.5) models
-- **Smart Decision Tree**: Automatically detects content type (math, code, questions, etc.) and formats responses accordingly
-- **Image Analysis**: Analyze images, charts, and screenshots using vision APIs
-- **Beautiful UI**: Chrome-inspired shiny, modern design with glossy surfaces
-- **Usage Tracking**: Comprehensive analytics dashboard for tracking usage and performance
-- **Feedback System**: Like/dislike buttons with feedback collection
-- **Conversation History**: Separate tab to view and revisit previous conversations
-- **Hotkey Support**: Quick activation with Alt+Shift+A (Option key on Mac)
+- **Powered by Claude Haiku 4.5**: One fast, cost-effective model — no provider or model picking
+- **Smart Decision Tree**: Detects content type (math, multiple-choice, fill-in-the-blank, questions, …) and formats responses accordingly
+- **Answer Styles**: Switch between "just the answer" and "concept explainer" from the overlay
+- **Image Analysis**: Read and solve problems from images and screenshots
+- **Beautiful UI**: Chrome-inspired modern design, with dark and light themes
+- **Usage & Cost Tracking**: Analytics dashboard with token spend and an optional monthly budget
+- **Conversation History**: Searchable, exportable history tab
+- **Hotkeys**: `Alt+Shift+A` to analyze, `Esc` to close, `↑` to recall your last follow-up (Option key on Mac)
 
 ## Installation
 
@@ -24,20 +24,17 @@ An AI-powered Chrome extension that provides accurate, user-friendly assistance 
 ## Configuration
 
 1. Click the extension icon and select "Settings"
-2. Choose your preferred AI provider (OpenAI or Claude)
-3. Select a model
-4. Enter your API keys:
-   - **OpenAI**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
-   - **Claude**: Get from [Anthropic Console](https://console.anthropic.com/)
+2. Enter your **Claude API key** — get one from [Anthropic Console](https://console.anthropic.com/)
+3. (Optional) Pick a theme, answer style, and a monthly spend budget
 
 ## Usage
 
 1. Select text or an image on any webpage
 2. Press `Shift+Alt+A` (Option key on Mac)
-3. The analysis window will appear in the bottom-right corner
-4. View results with confidence indicator
+3. The analysis window appears in the bottom-right corner
+4. Read the answer; switch answer style or ask a follow-up
 5. Use like/dislike buttons to provide feedback
-6. Access conversation history via the History tab
+6. Search and revisit past conversations via the History tab
 
 ## Architecture
 
@@ -69,19 +66,18 @@ The extension follows a structured decision tree:
 - **Fill-in-the-blank**: Return most likely answer (with Final Answer)
 - **Questions**: Brief answer with Final Answer field
 - **Math problems**: Step-by-step solution with Final Answer
+- **Multiple-choice**: Pick the single best option, state it as the Final Answer
 - **Matter-of-fact statements**: ≤15-word summary, ask how to proceed (no Final Answer)
-- **Commands**: Execute and return result (with Final Answer)
-- **Code**: Identify language, summarize functionality (no Final Answer)
-- **Images with text**: Apply text analysis rules to extracted text
-- **Images without text**: Descriptive analysis (no Final Answer)
+- **Commands**: Carry out and return result (with Final Answer)
+- **Images**: Read the problem in the image and solve it
 
 ## Privacy
 
 - Usage statistics and history stay on your device (`chrome.storage.local`); they are never uploaded to us
 - API keys and settings are kept in `chrome.storage.sync`, so Chrome syncs them across the browsers where you're signed in. They are **not** sent to any server we control, but note that `chrome.storage.sync` is **not encrypted at rest** — treat the keys as plaintext on your machine(s)
 - No external dependencies and no third-party analytics
-- The only network calls are HTTPS requests to the OpenAI and Anthropic APIs you configure
-- Only the text/image you select is sent to your chosen AI provider
+- The only network calls are HTTPS requests to the Anthropic (Claude) API
+- Only the text/image you select is sent to the Claude API
 
 ## License
 

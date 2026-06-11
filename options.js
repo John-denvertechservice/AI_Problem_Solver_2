@@ -1,32 +1,23 @@
 // AI Problem Solver - Options Page Script
-
-const OPENAI_MODELS = {
-  'gpt-4.1-nano': 'GPT-4.1 Nano',
-  'gpt-4.1-mini': 'GPT-4.1 Mini',
-  'gpt-4.1': 'GPT-4.1'
-};
-
-const CLAUDE_MODELS = {
-  'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
-  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-  'claude-opus-4-8': 'Claude Opus 4.8'
-};
+// Single provider (Claude Haiku). Settings: { claudeKey, theme, trackUsage,
+// answerStyle, monthlyBudgetUsd }. Theme and answer style persist immediately so
+// the in-page overlay updates live via chrome.storage.onChanged.
 
 let currentSettings = {
-  provider: 'openai',
-  model: 'gpt-4.1-mini',
-  openaiKey: '',
-  claudeKey: ''
+  claudeKey: '',
+  theme: 'dark',
+  trackUsage: true,
+  answerStyle: 'answer',
+  monthlyBudgetUsd: 0
 };
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   setupTabs();
-  setupProviderCards();
-  setupModelSelector();
   setupToggleVisibility();
   setupThemeSelector();
+  setupAnswerStyleSelector();
   setupSaveButton();
   setupDataButtons();
 });
@@ -36,45 +27,51 @@ function loadSettings() {
   chrome.storage.sync.get(['settings'], (result) => {
     if (result.settings) {
       currentSettings = { ...currentSettings, ...result.settings };
-      applySettings();
     }
+    applySettings();
   });
 }
 
 // Apply settings to UI
 function applySettings() {
-  // Provider
-  document.querySelectorAll('.provider-card').forEach(card => {
-    card.classList.toggle('active', card.dataset.provider === currentSettings.provider);
-  });
-  
-  // Model selector
-  updateModelSelector();
-  
-  // API keys (masked)
-  document.getElementById('openai-key').value = currentSettings.openaiKey ? '••••••••' : '';
   document.getElementById('claude-key').value = currentSettings.claudeKey ? '••••••••' : '';
-  
-  // Preferences
   document.getElementById('track-usage').checked = currentSettings.trackUsage !== false;
 
-  // Theme
   const themeSelect = document.getElementById('theme-select');
   if (themeSelect) themeSelect.value = currentSettings.theme === 'light' ? 'light' : 'dark';
+
+  const styleSelect = document.getElementById('answer-style-select');
+  if (styleSelect) styleSelect.value = currentSettings.answerStyle === 'explain' ? 'explain' : 'answer';
+
+  const budget = document.getElementById('monthly-budget');
+  if (budget) budget.value = Number(currentSettings.monthlyBudgetUsd) || 0;
 }
 
-// Theme selector — persist immediately so the in-page overlay updates live via
-// chrome.storage.onChanged, without waiting for the Save button.
+// Persist a single settings field immediately, merging with whatever is stored.
+function persistSetting(key, value) {
+  currentSettings[key] = value;
+  chrome.storage.sync.get(['settings'], (result) => {
+    const settings = result.settings || {};
+    settings[key] = value;
+    chrome.storage.sync.set({ settings });
+  });
+}
+
+// Theme selector — persist immediately so the in-page overlay updates live.
 function setupThemeSelector() {
   const select = document.getElementById('theme-select');
   if (!select) return;
   select.addEventListener('change', () => {
-    currentSettings.theme = select.value === 'light' ? 'light' : 'dark';
-    chrome.storage.sync.get(['settings'], (result) => {
-      const settings = result.settings || {};
-      settings.theme = currentSettings.theme;
-      chrome.storage.sync.set({ settings });
-    });
+    persistSetting('theme', select.value === 'light' ? 'light' : 'dark');
+  });
+}
+
+// Answer-style selector — persist immediately (mirrors the overlay's quick switch).
+function setupAnswerStyleSelector() {
+  const select = document.getElementById('answer-style-select');
+  if (!select) return;
+  select.addEventListener('change', () => {
+    persistSetting('answerStyle', select.value === 'explain' ? 'explain' : 'answer');
   });
 }
 
@@ -82,153 +79,78 @@ function setupThemeSelector() {
 function setupTabs() {
   const tabs = document.querySelectorAll('.options-tab');
   const contents = document.querySelectorAll('.options-tab-content');
-  
+
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       const targetTab = tab.dataset.tab;
-      
       tabs.forEach(t => t.classList.remove('active'));
       contents.forEach(c => c.classList.remove('active'));
-      
       tab.classList.add('active');
       document.querySelector(`[data-content="${targetTab}"]`).classList.add('active');
     });
   });
 }
 
-// Setup provider cards
-function setupProviderCards() {
-  document.querySelectorAll('.provider-card').forEach(card => {
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('active'));
-      card.classList.add('active');
-      currentSettings.provider = card.dataset.provider;
-      updateModelSelector();
-    });
-  });
-}
-
-// Update model selector
-function updateModelSelector() {
-  const modelSelect = document.getElementById('model-select');
-  const modelHint = document.getElementById('model-hint');
-  const models = currentSettings.provider === 'openai' ? OPENAI_MODELS : CLAUDE_MODELS;
-  
-  modelSelect.innerHTML = '<option value="">Select a model...</option>';
-  
-  Object.entries(models).forEach(([value, name]) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = name;
-    if (value === currentSettings.model) {
-      option.selected = true;
-    }
-    modelSelect.appendChild(option);
-  });
-  
-  // Update hint
-  if (currentSettings.provider === 'openai') {
-    modelHint.textContent = 'GPT-4.1 Mini is recommended for fast responses. All GPT-4.1 models support vision.';
-  } else {
-    modelHint.textContent = 'Claude Sonnet 4.6 is recommended for best accuracy. All Claude models support vision.';
-  }
-  
-  // Listen for model changes
-  modelSelect.addEventListener('change', (e) => {
-    currentSettings.model = e.target.value;
-  });
-}
-
-// Initialize the model selector (shim for earlier call sites)
-// Ensures the selector is populated on load. Further updates happen
-// via provider-card clicks which call updateModelSelector().
-function setupModelSelector() {
-  updateModelSelector();
-}
-
-// Setup toggle visibility
+// Setup toggle visibility for the API key field
 function setupToggleVisibility() {
   document.querySelectorAll('.toggle-visibility').forEach(btn => {
     btn.addEventListener('click', () => {
       const targetId = btn.dataset.target;
       const input = document.getElementById(targetId);
       const isPassword = input.type === 'password';
-      
+
       input.type = isPassword ? 'text' : 'password';
       btn.textContent = isPassword ? '🙈' : '👁️';
-      
-      // If showing and it's masked, we need to get the real value
+
+      // If revealing a masked key, fetch the real value from storage.
       if (isPassword && input.value === '••••••••') {
-        // Get actual key from storage
         chrome.storage.sync.get(['settings'], (result) => {
-          if (result.settings) {
-            const keyName = targetId === 'openai-key' ? 'openaiKey' : 'claudeKey';
-            input.value = result.settings[keyName] || '';
-          }
+          if (result.settings) input.value = result.settings.claudeKey || '';
         });
       }
     });
   });
-  
-  // Handle input changes
-  document.getElementById('openai-key').addEventListener('input', (e) => {
-    if (e.target.value !== '••••••••') {
-      currentSettings.openaiKey = e.target.value;
-    }
-  });
-  
+
   document.getElementById('claude-key').addEventListener('input', (e) => {
-    if (e.target.value !== '••••••••') {
-      currentSettings.claudeKey = e.target.value;
-    }
+    if (e.target.value !== '••••••••') currentSettings.claudeKey = e.target.value;
   });
 }
 
 // Setup save button
 function setupSaveButton() {
-  document.getElementById('save-settings').addEventListener('click', () => {
-    saveSettings();
-  });
+  document.getElementById('save-settings').addEventListener('click', saveSettings);
 }
 
-// Save settings
+// Save settings. Merge this page's owned fields into the latest stored object
+// rather than overwriting it wholesale — theme/answerStyle may have been
+// live-persisted from the overlay (or another tab) since this page loaded.
 function saveSettings() {
-  // Get actual API key values
-  const openaiKeyInput = document.getElementById('openai-key');
   const claudeKeyInput = document.getElementById('claude-key');
-  
-  if (openaiKeyInput.value !== '••••••••') {
-    currentSettings.openaiKey = openaiKeyInput.value;
-  }
-  
   if (claudeKeyInput.value !== '••••••••') {
     currentSettings.claudeKey = claudeKeyInput.value;
   }
-  
-  // Get preferences
+
   currentSettings.trackUsage = document.getElementById('track-usage').checked;
-  
-  // Validate
-  if (!currentSettings.model) {
-    showStatus('Please select a model', 'error');
+  currentSettings.monthlyBudgetUsd = Number(document.getElementById('monthly-budget').value) || 0;
+
+  if (!currentSettings.claudeKey) {
+    showStatus('Please enter your Claude API key', 'error');
     return;
   }
-  
-  const requiredKey = currentSettings.provider === 'openai' ? 'openaiKey' : 'claudeKey';
-  if (!currentSettings[requiredKey]) {
-    showStatus(`Please enter your ${currentSettings.provider === 'openai' ? 'OpenAI' : 'Claude'} API key`, 'error');
-    return;
-  }
-  
-  // Save to storage
-  chrome.storage.sync.set({ settings: currentSettings }, () => {
-    showStatus('Settings saved successfully!', 'success');
-    
-    // Re-mask API keys
-    openaiKeyInput.type = 'password';
-    openaiKeyInput.value = currentSettings.openaiKey ? '••••••••' : '';
-    claudeKeyInput.type = 'password';
-    claudeKeyInput.value = currentSettings.claudeKey ? '••••••••' : '';
+
+  chrome.storage.sync.get(['settings'], (result) => {
+    const settings = {
+      ...(result.settings || {}),
+      claudeKey: currentSettings.claudeKey,
+      trackUsage: currentSettings.trackUsage,
+      monthlyBudgetUsd: currentSettings.monthlyBudgetUsd
+    };
+    currentSettings = { ...currentSettings, ...settings };
+    chrome.storage.sync.set({ settings }, () => {
+      showStatus('Settings saved successfully!', 'success');
+      claudeKeyInput.type = 'password';
+      claudeKeyInput.value = currentSettings.claudeKey ? '••••••••' : '';
+    });
   });
 }
 
@@ -237,7 +159,7 @@ function showStatus(message, type = 'info') {
   const statusEl = document.getElementById('save-status');
   statusEl.textContent = message;
   statusEl.className = `save-status ${type}`;
-  
+
   setTimeout(() => {
     statusEl.textContent = '';
     statusEl.className = 'save-status';
@@ -253,7 +175,7 @@ function setupDataButtons() {
       });
     }
   });
-  
+
   document.getElementById('export-data').addEventListener('click', () => {
     chrome.storage.local.get(null, (data) => {
       const json = JSON.stringify(data, null, 2);
@@ -261,7 +183,7 @@ function setupDataButtons() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `chrome-problem-solver-data-${Date.now()}.json`;
+      a.download = `ai-problem-solver-data-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       showStatus('Data exported', 'success');

@@ -1137,3 +1137,68 @@
   }
 }
 
+/* ── v2 additions: answer-style selector, error retry, history controls, budget ── */
+
+/* Answer-style selector in the header */
+.cps-style-select {
+  background: var(--cps-btn-bg);
+  color: var(--cps-text-primary);
+  border: 1px solid var(--cps-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  max-width: 130px;
+}
+.cps-style-select:hover { background: var(--cps-btn-bg-hover); }
+.cps-style-select option { color: #000; }
+
+/* Friendly error card with inline Retry */
+.cps-error {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.cps-error-text { line-height: 1.4; }
+.cps-error-retry { align-self: flex-start; }
+
+/* Over-budget notice prepended to an answer */
+.cps-budget-notice {
+  color: var(--cps-warning);
+  background: rgba(255, 152, 0, 0.12);
+  border-left: 3px solid var(--cps-warning);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+/* History search + export controls */
+.cps-history-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cps-history-search {
+  flex: 1;
+  background: var(--cps-surface-2);
+  color: var(--cps-text-primary);
+  border: 1px solid var(--cps-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.cps-history-search::placeholder { color: var(--cps-text-secondary); }
+.cps-history-export {
+  background: var(--cps-btn-bg);
+  color: var(--cps-text-primary);
+  border: 1px solid var(--cps-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cps-history-export:hover { background: var(--cps-btn-bg-hover); }
+

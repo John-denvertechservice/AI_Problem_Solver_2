@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI Problem Solver",
   "version": "2.0.0",
-  "description": "AI-powered assistant for solving math, logic, and coding problems with OpenAI and Claude",
+  "description": "AI-powered study assistant for math, language, multiple-choice, and fill-in-the-blank problems, powered by Claude",
   "permissions": [
     "activeTab",
     "storage",
@@ -11,7 +11,6 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "https://api.openai.com/*",
     "https://api.anthropic.com/*"
   ],
   "background": {
